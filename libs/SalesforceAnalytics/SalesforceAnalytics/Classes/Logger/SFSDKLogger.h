@@ -88,60 +88,60 @@
 /**
  * Logs an error log line.
  *
- * @param class Class.
+ * @param cls Class.
  * @param message Log message.
  */
-- (void)e:(nonnull Class)class message:(nonnull NSString *)message;
+- (void)e:(nonnull Class)cls message:(nonnull NSString *)message;
 
 /**
  * Logs a warning log line.
  *
- * @param class Class.
+ * @param cls Class.
  * @param message Log message.
  */
-- (void)w:(nonnull Class)class message:(nonnull NSString *)message;
+- (void)w:(nonnull Class)cls message:(nonnull NSString *)message;
 
 /**
  * Logs an info log line.
  *
- * @param class Class.
+ * @param cls Class.
  * @param message Log message.
  */
-- (void)i:(nonnull Class)class message:(nonnull NSString *)message;
+- (void)i:(nonnull Class)cls message:(nonnull NSString *)message;
 
 /**
  * Logs a verbose log line.
  *
- * @param class Class.
+ * @param cls Class.
  * @param message Log message.
  */
-- (void)v:(nonnull Class)class message:(nonnull NSString *)message;
+- (void)v:(nonnull Class)cls message:(nonnull NSString *)message;
 
 /**
  * Logs a debug log line.
  *
- * @param class Class.
+ * @param cls Class.
  * @param message Log message.
  */
-- (void)d:(nonnull Class)class message:(nonnull NSString *)message;
+- (void)d:(nonnull Class)cls message:(nonnull NSString *)message;
 
 /**
  * Logs a log line of the specified level.
  *
- * @param class Class.
+ * @param cls Class.
  * @param level Log level.
  * @param message Log message.
  */
-- (void)log:(nonnull Class)class level:(DDLogLevel)level message:(nonnull NSString *)message;
+- (void)log:(nonnull Class)cls level:(DDLogLevel)level message:(nonnull NSString *)message;
 
 /**
  * Logs a log line of the specified level.
  *
- * @param class Class.
+ * @param cls Class.
  * @level Log level.
  * @param format The format message, and optional arguments to expand in the format.
  * @param ... The arguments to the message format string.
  */
-- (void)log:(nonnull Class)class level:(DDLogLevel)level format:(nonnull NSString *)format, ...;
+- (void)log:(nonnull Class)cls level:(DDLogLevel)level format:(nonnull NSString *)format, ...;
 
 @end

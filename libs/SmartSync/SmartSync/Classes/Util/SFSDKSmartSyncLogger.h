@@ -48,46 +48,46 @@
 /**
  * Logs an error log line.
  *
- * @param class Class.
+ * @param cls class.
  * @param format The format message, and optional arguments to expand in the format.
  * @param ... The arguments to the message format string.
  */
-+ (void)e:(nonnull Class)class format:(nonnull NSString *)format, ...;
++ (void)e:(nonnull Class)cls format:(nonnull NSString *)format, ...;
 
 /**
  * Logs a warning log line.
  *
- * @param class Class.
+ * @param cls class.
  * @param format The format message, and optional arguments to expand in the format.
  * @param ... The arguments to the message format string.
  */
-+ (void)w:(nonnull Class)class format:(nonnull NSString *)format, ...;
++ (void)w:(nonnull Class)cls format:(nonnull NSString *)format, ...;
 
 /**
  * Logs an info log line.
  *
- * @param class Class.
+ * @param cls class.
  * @param format The format message, and optional arguments to expand in the format.
  * @param ... The arguments to the message format string.
  */
-+ (void)i:(nonnull Class)class format:(nonnull NSString *)format, ...;
++ (void)i:(nonnull Class)cls format:(nonnull NSString *)format, ...;
 
 /**
  * Logs a verbose log line.
  *
- * @param class Class.
+ * @param cls class.
  * @param format The format message, and optional arguments to expand in the format.
  * @param ... The arguments to the message format string.
  */
-+ (void)v:(nonnull Class)class format:(nonnull NSString *)format, ...;
++ (void)v:(nonnull Class)cls format:(nonnull NSString *)format, ...;
 
 /**
  * Logs a debug log line.
  *
- * @param class Class.
+ * @param cls class.
  * @param format The format message, and optional arguments to expand in the format.
  * @param ... The arguments to the message format string.
  */
-+ (void)d:(nonnull Class)class format:(nonnull NSString *)format, ...;
++ (void)d:(nonnull Class)cls format:(nonnull NSString *)format, ...;
 
 @end
