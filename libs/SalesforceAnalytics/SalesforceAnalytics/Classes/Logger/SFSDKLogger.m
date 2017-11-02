@@ -132,37 +132,37 @@ static NSMutableDictionary<NSString *, SFSDKLogger *> *loggerList = nil;
     [self.logger addLogger:self.fileLogger withLevel:logLevel];
 }
 
-- (void)e:(Class)class message:(NSString *)message {
-    [self log:class level:DDLogLevelError message:message];
+- (void)e:(Class)cls message:(NSString *)message {
+    [self log:cls level:DDLogLevelError message:message];
 }
 
-- (void)w:(Class)class message:(NSString *)message {
-    [self log:class level:DDLogLevelWarning message:message];
+- (void)w:(Class)cls message:(NSString *)message {
+    [self log:cls level:DDLogLevelWarning message:message];
 }
 
-- (void)i:(Class)class message:(NSString *)message {
-    [self log:class level:DDLogLevelInfo message:message];
+- (void)i:(Class)cls message:(NSString *)message {
+    [self log:cls level:DDLogLevelInfo message:message];
 }
 
-- (void)v:(Class)class message:(NSString *)message {
-    [self log:class level:DDLogLevelVerbose message:message];
+- (void)v:(Class)cls message:(NSString *)message {
+    [self log:cls level:DDLogLevelVerbose message:message];
 }
 
-- (void)d:(Class)class message:(NSString *)message {
-    [self log:class level:DDLogLevelDebug message:message];
+- (void)d:(Class)cls message:(NSString *)message {
+    [self log:cls level:DDLogLevelDebug message:message];
 }
 
-- (void)log:(Class)class level:(DDLogLevel)level message:(NSString *)message {
-    NSString *tag = [NSString stringWithFormat:kLogIdentifierFormat, self.componentName, class];
+- (void)log:(nonnull Class)cls level:(DDLogLevel)level message:(NSString *)message {
+    NSString *tag = [NSString stringWithFormat:kLogIdentifierFormat, self.componentName, cls];
     DDLogMessage *logMessage = [[DDLogMessage alloc] initWithMessage:message level:level flag:DDLogFlagForLogLevel(level) context:0 file:nil function:nil line:0 tag:tag options:0 timestamp:[NSDate date]];
     [self.logger log:YES message:logMessage];
 }
 
-- (void)log:(Class)class level:(DDLogLevel)level format:(NSString *)format, ... {
+- (void)log:(nonnull Class)cls level:(DDLogLevel)level format:(NSString *)format, ... {
     va_list args;
     va_start(args, format);
     NSString *formattedMessage = [[NSString alloc] initWithFormat:format arguments:args];
-    [self log:class level:level message:formattedMessage];
+    [self log:cls level:level message:formattedMessage];
     va_end(args);
 }
 

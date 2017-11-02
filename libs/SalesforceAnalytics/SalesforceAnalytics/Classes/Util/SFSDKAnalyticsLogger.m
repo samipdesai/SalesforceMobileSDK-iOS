@@ -43,45 +43,45 @@ static NSString * const kComponentName = @"SalesforceAnalytics";
     logger.logLevel = logLevel;
 }
 
-+ (void)e:(Class)class format:(NSString *)format, ... {
++ (void)e:(Class)cls format:(NSString *)format, ... {
     va_list args;
     va_start(args, format);
-    [SFSDKAnalyticsLogger log:DDLogLevelError class:class message:format args:args];
+    [SFSDKAnalyticsLogger log:DDLogLevelError class:cls message:format args:args];
     va_end(args);
 }
 
-+ (void)w:(Class)class format:(NSString *)format, ... {
++ (void)w:(Class)cls format:(NSString *)format, ... {
     va_list args;
     va_start(args, format);
-    [SFSDKAnalyticsLogger log:DDLogLevelWarning class:class message:format args:args];
+    [SFSDKAnalyticsLogger log:DDLogLevelWarning class:cls message:format args:args];
     va_end(args);
 }
 
-+ (void)i:(Class)class format:(NSString *)format, ... {
++ (void)i:(Class)cls format:(NSString *)format, ... {
     va_list args;
     va_start(args, format);
-    [SFSDKAnalyticsLogger log:DDLogLevelInfo class:class message:format args:args];
+    [SFSDKAnalyticsLogger log:DDLogLevelInfo class:cls message:format args:args];
     va_end(args);
 }
 
-+ (void)v:(Class)class format:(NSString *)format, ... {
++ (void)v:(Class)cls format:(NSString *)format, ... {
     va_list args;
     va_start(args, format);
-    [SFSDKAnalyticsLogger log:DDLogLevelVerbose class:class message:format args:args];
+    [SFSDKAnalyticsLogger log:DDLogLevelVerbose class:cls message:format args:args];
     va_end(args);
 }
 
-+ (void)d:(Class)class format:(NSString *)format, ... {
++ (void)d:(Class)cls format:(NSString *)format, ... {
     va_list args;
     va_start(args, format);
-    [SFSDKAnalyticsLogger log:DDLogLevelDebug class:class message:format args:args];
+    [SFSDKAnalyticsLogger log:DDLogLevelDebug class:cls message:format args:args];
     va_end(args);
 }
 
-+ (void)log:(DDLogLevel)level class:(Class)class message:(NSString *)message args:(va_list)args {
++ (void)log:(DDLogLevel)level class:(Class)cls message:(NSString *)message args:(va_list)args {
     NSString *formattedMessage = [[NSString alloc] initWithFormat:message arguments:args];
     SFSDKLogger *logger = [SFSDKLogger sharedInstanceWithComponent:kComponentName];
-    [logger log:class level:level message:formattedMessage];
+    [logger log:cls level:level message:formattedMessage];
 }
 
 @end
