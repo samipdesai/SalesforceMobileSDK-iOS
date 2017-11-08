@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -36,7 +36,6 @@ NSString* const kTestRequestStatusDidTimeout = @"didTimeout";
 
 @interface SFSDKTestRequestListener ()
 {
-    SFAuthenticationManager *_authMgr;
     SFAccountManagerServiceType _serviceType;
 }
 
@@ -74,7 +73,6 @@ NSString* const kTestRequestStatusDidTimeout = @"didTimeout";
 {
     self = [super init];
     if (nil != self) {
-        _authMgr = [SFAuthenticationManager sharedManager];
         self.maxWaitTime = 30.0;
         self.returnStatus = kTestRequestStatusWaiting;
     }
@@ -101,11 +99,10 @@ NSString* const kTestRequestStatusDidTimeout = @"didTimeout";
     while ([self.returnStatus isEqualToString:kTestRequestStatusWaiting]) {
         NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:startTime];
         if (elapsed > self.maxWaitTime) {
-            [self log:SFLogLevelDebug format:@"'%@' Request took too long (> %f secs) to complete.", [self serviceTypeDescription], elapsed];
+            [SFSDKCoreLogger d:[self class] format:@"'%@' Request took too long (> %f secs) to complete.", [self serviceTypeDescription], elapsed];
             return kTestRequestStatusDidTimeout;
         }
         
-        [self log:SFLogLevelDebug msg:@"## sleeping..."];
         [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
     }
     
@@ -117,9 +114,9 @@ NSString* const kTestRequestStatusDidTimeout = @"didTimeout";
 - (void)configureAccountServiceDelegate
 {
     if (_serviceType == SFAccountManagerServiceTypeIdentity) {
-        _authMgr.idCoordinator.delegate = self;
+        [SFAuthenticationManager sharedManager].idCoordinator.delegate = self;
     } else if (_serviceType == SFAccountManagerServiceTypeOAuth) {
-        _authMgr.coordinator.delegate = self;
+        [SFAuthenticationManager sharedManager].coordinator.delegate = self;
     } else {
         NSAssert1(NO, @"Service type '%lu' is not supported as a service object.", (unsigned long)_serviceType);
     }
@@ -128,9 +125,9 @@ NSString* const kTestRequestStatusDidTimeout = @"didTimeout";
 - (void)clearAccountManagerDelegate
 {
     if (_serviceType == SFAccountManagerServiceTypeIdentity) {
-        _authMgr.idCoordinator.delegate = nil;
+        [SFAuthenticationManager sharedManager].idCoordinator.delegate = nil;
     } else if (_serviceType == SFAccountManagerServiceTypeOAuth) {
-        _authMgr.coordinator.delegate = nil;
+        [SFAuthenticationManager sharedManager].coordinator.delegate = nil;
     }
 }
 
@@ -149,13 +146,13 @@ NSString* const kTestRequestStatusDidTimeout = @"didTimeout";
 
 - (void)identityCoordinatorRetrievedData:(SFIdentityCoordinator *)coordinator
 {
-    [self log:SFLogLevelInfo format:@"%@", NSStringFromSelector(_cmd)];
+    [SFSDKCoreLogger i:[self class] format:@"%@", NSStringFromSelector(_cmd)];
     self.returnStatus = kTestRequestStatusDidLoad;
 }
 
 - (void)identityCoordinator:(SFIdentityCoordinator *)coordinator didFailWithError:(NSError *)error
 {
-    [self log:SFLogLevelInfo format:@"%@ with error: %@", NSStringFromSelector(_cmd), error];
+    [SFSDKCoreLogger i:[self class] format:@"%@ with error: %@", NSStringFromSelector(_cmd), error];
     self.lastError = error;
     self.returnStatus = kTestRequestStatusDidFail;
 }
@@ -182,15 +179,23 @@ NSString* const kTestRequestStatusDidTimeout = @"didTimeout";
     NSAssert(NO, @"User Agent flow not supported in this class.");
 }
 
+- (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didBeginAuthenticationWithSafariViewController:(SFSafariViewController *)svc {
+    NSAssert(NO, @"Web Server flow not supported in this class.");
+}
+
+- (void)oauthCoordinatorDidCancelBrowserAuthentication:(SFOAuthCoordinator *)coordinator {
+    NSAssert(NO, @"Web Server flow not supported in this class.");
+}
+
 - (void)oauthCoordinatorDidAuthenticate:(SFOAuthCoordinator *)coordinator authInfo:(SFOAuthInfo *)info
 {
-    [self log:SFLogLevelInfo format:@"%@ with authInfo: %@", NSStringFromSelector(_cmd), info];
+    [SFSDKCoreLogger i:[self class] format:@"%@ with authInfo: %@", NSStringFromSelector(_cmd), info];
     self.returnStatus = kTestRequestStatusDidLoad;
 }
 
 - (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didFailWithError:(NSError *)error authInfo:(SFOAuthInfo *)info
 {
-    [self log:SFLogLevelInfo format:@"%@ with authInfo: %@, error: %@", NSStringFromSelector(_cmd), info, error];
+    [SFSDKCoreLogger i:[self class] format:@"%@ with authInfo: %@, error: %@", NSStringFromSelector(_cmd), info, error];
     self.lastError = error;
     self.returnStatus = kTestRequestStatusDidFail;
 }

@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2011, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2011-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -47,7 +47,7 @@ NSException * SFOAuthInvalidIdentifierException() {
 
 //This property is intentionally readonly in the public header files.
 @property (nonatomic, readwrite, strong) NSString *protocol;
-    
+
 @end
 
 @implementation SFOAuthCredentials
@@ -61,7 +61,6 @@ NSException * SFOAuthInvalidIdentifierException() {
 @synthesize userId                    = _userId;         // cached user ID derived from identityURL
 @synthesize instanceUrl               = _instanceUrl;
 @synthesize issuedAt                  = _issuedAt;
-@synthesize logLevel                  = _logLevel;
 @synthesize protocol                  = _protocol;
 @synthesize encrypted                 = _encrypted;
 @synthesize legacyIdentityInformation = _legacyIdentityInformation;
@@ -74,6 +73,7 @@ NSException * SFOAuthInvalidIdentifierException() {
 
 - (id)initWithCoder:(NSCoder *)coder {
     NSString *clusterClassName = [coder decodeObjectOfClass:[NSString class] forKey:kSFOAuthClusterImplementationKey];
+    _credentialsChangeSet = [NSMutableDictionary new];
     if (clusterClassName.length == 0) {
         // Legacy credentials class (which doesn't have a persisted implementation class)
         // should default to SFOAuthKeychainCredentials.
@@ -138,10 +138,6 @@ NSException * SFOAuthInvalidIdentifierException() {
    
 }
 
-- (id)init {
-    return [self initWithIdentifier:nil clientId:nil encrypted:YES];
-}
-
 - (instancetype)initWithIdentifier:(NSString *)theIdentifier clientId:(NSString*)theClientId encrypted:(BOOL)encrypted {
     return [self initWithIdentifier:theIdentifier clientId:theClientId encrypted:encrypted storageType:SFOAuthCredentialsStorageTypeKeychain];
 }
@@ -165,14 +161,41 @@ NSException * SFOAuthInvalidIdentifierException() {
             self.identifier           = theIdentifier;
             self.clientId             = theClientId;
             self.domain               = kSFOAuthDefaultDomain;
-            self.logLevel             = kSFOAuthLogLevelInfo;
             self.protocol             = kSFOAuthProtocolHttps;
             _encrypted                = encrypted;
         }
     } else {
         self = [[targetClass alloc] initWithIdentifier:theIdentifier clientId:theClientId encrypted:encrypted storageType:type];
     }
+    _credentialsChangeSet = [NSMutableDictionary new];
     return self;
+}
+
+#pragma mark - NSCopying
+
+- (id)copyWithZone:(nullable NSZone *)zone {
+    SFOAuthCredentials *copyCreds = [[[self class] allocWithZone:zone] initWithIdentifier:self.identifier clientId:self.clientId encrypted:self.encrypted];
+    copyCreds.protocol = self.protocol;
+    copyCreds.domain = self.domain;
+    copyCreds.redirectUri = self.redirectUri;
+    copyCreds.jwt = self.jwt;
+    copyCreds.refreshToken = self.refreshToken;
+    copyCreds.accessToken = self.accessToken;
+    copyCreds.instanceUrl = self.instanceUrl;
+    copyCreds.communityId = self.communityId;
+    copyCreds.communityUrl = self.communityUrl;
+    copyCreds.issuedAt = self.issuedAt;
+    
+    // NB: Intentionally ordering the copying of these, because setting the identity URL automatically
+    // sets the OrgID and UserID.  This ensures the values stay in sync.
+    copyCreds.identityUrl = self.identityUrl;
+    copyCreds.organizationId = self.organizationId;
+    copyCreds.userId = self.userId;
+    
+    copyCreds.legacyIdentityInformation = [self.legacyIdentityInformation copy];
+    copyCreds.additionalOAuthFields = [self.additionalOAuthFields copy];
+    
+    return copyCreds;
 }
 
 #pragma mark - Public Methods
@@ -222,13 +245,13 @@ NSException * SFOAuthInvalidIdentifierException() {
         if (_identityUrl.path) {
             NSArray *pathComps = [_identityUrl.path componentsSeparatedByString:@"/"];
             if (pathComps.count < 2) {
-                [self log:SFLogLevelDebug format:@"%@:setIdentityUrl: invalid identityUrl: %@", [self class], _identityUrl];
+                [SFSDKCoreLogger d:[self class] format:@"%@:setIdentityUrl: invalid identityUrl: %@", [self class], _identityUrl];
                 return;
             }
             self.userId = pathComps[pathComps.count - 1];
             self.organizationId = pathComps[pathComps.count - 2];
         } else {
-            [self log:SFLogLevelDebug format:@"%@:setIdentityUrl: invalid or nil identityUrl: %@", [self class], _identityUrl];
+            [SFSDKCoreLogger d:[self class] format:@"%@:setIdentityUrl: invalid or nil identityUrl: %@", [self class], _identityUrl];
         }
     }
 }
@@ -260,17 +283,13 @@ NSException * SFOAuthInvalidIdentifierException() {
 
 - (void)revokeAccessToken {
     if (!([self.identifier length] > 0)) @throw SFOAuthInvalidIdentifierException();
-    if (self.logLevel < kSFOAuthLogLevelWarning) {
-        [self log:SFLogLevelDebug format:@"%@:revokeAccessToken: access token revoked", [self class]];
-    }
+    [SFSDKCoreLogger d:[self class] format:@"%@:revokeAccessToken: access token revoked", [self class]];
     self.accessToken = nil;
 }
 
 - (void)revokeRefreshToken {
     if (!([self.identifier length] > 0)) @throw SFOAuthInvalidIdentifierException();
-    if (self.logLevel < kSFOAuthLogLevelWarning) {
-        [self log:SFLogLevelDebug format:@"%@:revokeRefreshToken: refresh token revoked. Cleared identityUrl, instanceUrl, issuedAt fields", [self class]];
-    }
+    [SFSDKCoreLogger d:[self class] format:@"%@:revokeRefreshToken: refresh token revoked. Cleared identityUrl, instanceUrl, issuedAt fields", [self class]];
     self.refreshToken = nil;
     self.instanceUrl  = nil;
     self.communityId  = nil;
@@ -279,9 +298,29 @@ NSException * SFOAuthInvalidIdentifierException() {
     self.identityUrl  = nil;
 }
 
-- (void)revokeActivationCode {
-    if (!([self.identifier length] > 0)) @throw SFOAuthInvalidIdentifierException();
-    self.activationCode = nil;
+- (void)setPropertyForKey:(NSString *) propertyName withValue:(id) newValue {
+    id oldValue = [self valueForKey:propertyName];
+    if (newValue) {
+        if (![newValue isEqual:oldValue]) {
+            @synchronized (_credentialsChangeSet) {
+                _credentialsChangeSet[propertyName] = @[oldValue == nil ? [NSNull null] : oldValue, newValue];
+            }
+        }
+    }
+    [self setValue:newValue forKey:propertyName];
 }
+
+- (void)resetCredentialsChangeSet {
+    if (_credentialsChangeSet) {
+        @synchronized (_credentialsChangeSet) {
+            [_credentialsChangeSet removeAllObjects];
+        }
+    }
+}
+
+- (BOOL)hasPropertyValueChangedForKey:(NSString *) key {
+    return [_credentialsChangeSet objectForKey:key]!=nil;
+}
+
 
 @end

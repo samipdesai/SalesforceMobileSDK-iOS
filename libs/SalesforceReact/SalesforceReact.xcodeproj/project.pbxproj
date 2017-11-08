@@ -25,7 +25,9 @@
 		829DA2BD1C126C6A0040F5F1 /* SFSmartStoreReactBridge.h in Headers */ = {isa = PBXBuildFile; fileRef = 4F3618A51AA51E9900AE3A65 /* SFSmartStoreReactBridge.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		829DA2BE1C126C700040F5F1 /* SFSmartSyncReactBridge.h in Headers */ = {isa = PBXBuildFile; fileRef = 4FABF0691AA52E7E00D31E3F /* SFSmartSyncReactBridge.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		829DA2C11C126D320040F5F1 /* SalesforceReact.h in Headers */ = {isa = PBXBuildFile; fileRef = 829DA2C01C126D320040F5F1 /* SalesforceReact.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		CE0AB04A1C10D24E00BFAEED /* SalesforceNetwork.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE0AB0491C10D24E00BFAEED /* SalesforceNetwork.framework */; };
+		CE2B8D021CE9325E00C6FC6A /* SalesforceAnalytics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE2B8D011CE9325E00C6FC6A /* SalesforceAnalytics.framework */; };
+		CE4712661EFC668A00D9E059 /* SFSDKReactLogger.h in Headers */ = {isa = PBXBuildFile; fileRef = CE4712641EFC668A00D9E059 /* SFSDKReactLogger.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		CE4712671EFC668A00D9E059 /* SFSDKReactLogger.m in Sources */ = {isa = PBXBuildFile; fileRef = CE4712651EFC668A00D9E059 /* SFSDKReactLogger.m */; };
 		CE4CE4661C0E5B93009F6029 /* SFSmartStoreReactBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 4F3618A41AA51E9900AE3A65 /* SFSmartStoreReactBridge.m */; };
 		CE4CE4671C0E5B9D009F6029 /* SFSmartSyncReactBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 4FABF06A1AA52EC800D31E3F /* SFSmartSyncReactBridge.m */; };
 		CE4CE4681C0E5BBB009F6029 /* SFOauthReactBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 4FABF06E1AA6920800D31E3F /* SFOauthReactBridge.m */; };
@@ -34,7 +36,6 @@
 		CE65C2411C0FD57200319E68 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE65C2401C0FD57200319E68 /* Foundation.framework */; };
 		CE65C2431C0FD58000319E68 /* SmartStore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE65C2421C0FD58000319E68 /* SmartStore.framework */; };
 		CE65C2451C0FD58800319E68 /* SalesforceSDKCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE65C2441C0FD58800319E68 /* SalesforceSDKCore.framework */; };
-		CE65C2491C0FD59200319E68 /* SalesforceRestAPI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CE65C2481C0FD59200319E68 /* SalesforceRestAPI.framework */; };
 		CE65C24B1C0FD59800319E68 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = CE65C24A1C0FD59800319E68 /* libz.tbd */; };
 		CE6AB3DF1C10CEF90012125E /* libReact.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 4FFEE6301BFE932100B7AA8A /* libReact.a */; };
 /* End PBXBuildFile section */
@@ -68,12 +69,68 @@
 			remoteGlobalIDString = 4F06AF2E1C499FD100F70798;
 			remoteInfo = SmartSyncTestApp;
 		};
+		CE47126F1EFC668B00D9E059 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 2D2A28131D9B038B00D4039D;
+			remoteInfo = "React-tvOS";
+		};
+		CE4712711EFC668B00D9E059 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 3D3C059A1DE3340900C268FA;
+			remoteInfo = yoga;
+		};
+		CE4712731EFC668B00D9E059 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 3D3C06751DE3340C00C268FA;
+			remoteInfo = "yoga-tvOS";
+		};
+		CE4712751EFC668B00D9E059 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 3D3CD9251DE5FBEC00167DC4;
+			remoteInfo = cxxreact;
+		};
+		CE4712771EFC668B00D9E059 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 3D3CD9321DE5FBEE00167DC4;
+			remoteInfo = "cxxreact-tvOS";
+		};
+		CE4712791EFC668B00D9E059 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 3D3CD90B1DE5FBD600167DC4;
+			remoteInfo = jschelpers;
+		};
+		CE47127B1EFC668B00D9E059 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 3D3CD9181DE5FBD800167DC4;
+			remoteInfo = "jschelpers-tvOS";
+		};
 		CE4CE4B11C0E611A009F6029 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */;
 			proxyType = 1;
 			remoteGlobalIDString = 83CBBA2D1A601D0E00E9B192;
 			remoteInfo = React;
+		};
+		CE81A9AB1E9C251100F3D0AD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4FFEE5CF1BFE904100B7AA8A /* SmartSync.xcodeproj */;
+			proxyType = 1;
+			remoteGlobalIDString = CE4CE2C81C0E463C009F6029;
+			remoteInfo = SmartSync;
 		};
 		CEBA95211C1BA47900C0B2E0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -102,12 +159,13 @@
 		4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = React.xcodeproj; path = "../../external/react-native/React/React.xcodeproj"; sourceTree = "<group>"; };
 		829DA2C01C126D320040F5F1 /* SalesforceReact.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SalesforceReact.h; sourceTree = "<group>"; };
 		82D0AB401C4980420081F833 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		CE0AB0491C10D24E00BFAEED /* SalesforceNetwork.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SalesforceNetwork.framework; path = "../SalesforceNetwork/build/Debug-iphoneos/SalesforceNetwork.framework"; sourceTree = "<group>"; };
+		CE2B8D011CE9325E00C6FC6A /* SalesforceAnalytics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SalesforceAnalytics.framework; path = "../../../../../../Library/Developer/Xcode/DerivedData/SalesforceMobileSDK-erwysdzugrhbsladkxhwtacrvgws/Build/Products/Debug-iphonesimulator/SalesforceAnalytics.framework"; sourceTree = "<group>"; };
+		CE4712641EFC668A00D9E059 /* SFSDKReactLogger.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = SFSDKReactLogger.h; path = Classes/SFSDKReactLogger.h; sourceTree = "<group>"; };
+		CE4712651EFC668A00D9E059 /* SFSDKReactLogger.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = SFSDKReactLogger.m; path = Classes/SFSDKReactLogger.m; sourceTree = "<group>"; };
 		CE4CE2F81C0E4673009F6029 /* SalesforceReact.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = SalesforceReact.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE65C2401C0FD57200319E68 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS9.1.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		CE65C2421C0FD58000319E68 /* SmartStore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SmartStore.framework; path = "../SmartStore/build/Debug-iphoneos/SmartStore.framework"; sourceTree = "<group>"; };
 		CE65C2441C0FD58800319E68 /* SalesforceSDKCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SalesforceSDKCore.framework; path = "../SalesforceSDKCore/build/Debug-iphoneos/SalesforceSDKCore.framework"; sourceTree = "<group>"; };
-		CE65C2481C0FD59200319E68 /* SalesforceRestAPI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SalesforceRestAPI.framework; path = "../SalesforceRestAPI/build/Debug-iphoneos/SalesforceRestAPI.framework"; sourceTree = "<group>"; };
 		CE65C24A1C0FD59800319E68 /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS9.1.sdk/usr/lib/libz.tbd; sourceTree = DEVELOPER_DIR; };
 		CECB66341C1BB8F3008038AE /* SalesforceReact-Dynamic-iOS-Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = "SalesforceReact-Dynamic-iOS-Debug.xcconfig"; path = "Configuration/SalesforceReact-Dynamic-iOS-Debug.xcconfig"; sourceTree = "<group>"; };
 		CECB66351C1BB8F3008038AE /* SalesforceReact-Dynamic-iOS-Release.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = "SalesforceReact-Dynamic-iOS-Release.xcconfig"; path = "Configuration/SalesforceReact-Dynamic-iOS-Release.xcconfig"; sourceTree = "<group>"; };
@@ -118,9 +176,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CE0AB04A1C10D24E00BFAEED /* SalesforceNetwork.framework in Frameworks */,
+				CE2B8D021CE9325E00C6FC6A /* SalesforceAnalytics.framework in Frameworks */,
 				CE65C24B1C0FD59800319E68 /* libz.tbd in Frameworks */,
-				CE65C2491C0FD59200319E68 /* SalesforceRestAPI.framework in Frameworks */,
 				CE65C2451C0FD58800319E68 /* SalesforceSDKCore.framework in Frameworks */,
 				CE65C2431C0FD58000319E68 /* SmartStore.framework in Frameworks */,
 				CE65C23F1C0FD56C00319E68 /* SmartSync.framework in Frameworks */,
@@ -185,6 +242,8 @@
 		4FABF06C1AA52ECF00D31E3F /* Classes */ = {
 			isa = PBXGroup;
 			children = (
+				CE4712641EFC668A00D9E059 /* SFSDKReactLogger.h */,
+				CE4712651EFC668A00D9E059 /* SFSDKReactLogger.m */,
 				4FF0BCA11B826D4B00ABC91C /* SFNetReactBridge.h */,
 				4FF0BCA21B826D9400ABC91C /* SFNetReactBridge.m */,
 				4FABF0701AA6921E00D31E3F /* SFOauthReactBridge.h */,
@@ -200,11 +259,10 @@
 		4FFEE5CE1BFE901E00B7AA8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				CE2B8D011CE9325E00C6FC6A /* SalesforceAnalytics.framework */,
 				4FFEE62B1BFE932100B7AA8A /* React.xcodeproj */,
 				4FFEE5CF1BFE904100B7AA8A /* SmartSync.xcodeproj */,
-				CE0AB0491C10D24E00BFAEED /* SalesforceNetwork.framework */,
 				CE65C24A1C0FD59800319E68 /* libz.tbd */,
-				CE65C2481C0FD59200319E68 /* SalesforceRestAPI.framework */,
 				CE65C2441C0FD58800319E68 /* SalesforceSDKCore.framework */,
 				CE65C2421C0FD58000319E68 /* SmartStore.framework */,
 				CE65C2401C0FD57200319E68 /* Foundation.framework */,
@@ -227,6 +285,13 @@
 			isa = PBXGroup;
 			children = (
 				4FFEE6301BFE932100B7AA8A /* libReact.a */,
+				CE4712701EFC668B00D9E059 /* libReact.a */,
+				CE4712721EFC668B00D9E059 /* libyoga.a */,
+				CE4712741EFC668B00D9E059 /* libyoga.a */,
+				CE4712761EFC668B00D9E059 /* libcxxreact.a */,
+				CE4712781EFC668B00D9E059 /* libcxxreact.a */,
+				CE47127A1EFC668B00D9E059 /* libjschelpers.a */,
+				CE47127C1EFC668B00D9E059 /* libjschelpers.a */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -242,6 +307,7 @@
 				829DA2BB1C126C610040F5F1 /* SFNetReactBridge.h in Headers */,
 				829DA2BC1C126C670040F5F1 /* SFOauthReactBridge.h in Headers */,
 				829DA2BD1C126C6A0040F5F1 /* SFSmartStoreReactBridge.h in Headers */,
+				CE4712661EFC668A00D9E059 /* SFSDKReactLogger.h in Headers */,
 				829DA2BE1C126C700040F5F1 /* SFSmartSyncReactBridge.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -262,6 +328,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				CE81A9AC1E9C251100F3D0AD /* PBXTargetDependency */,
 				CE4CE4B21C0E611A009F6029 /* PBXTargetDependency */,
 			);
 			name = SalesforceReact;
@@ -275,7 +342,7 @@
 		4F36189E1AA51E3900AE3A65 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 0710;
+				LastUpgradeCheck = 0830;
 				TargetAttributes = {
 					4FEE442F1BFD50BE00F09C43 = {
 						CreatedOnToolsVersion = 7.1.1;
@@ -342,6 +409,55 @@
 			remoteRef = 828917461C52B58D002F9981 /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
+		CE4712701EFC668B00D9E059 /* libReact.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libReact.a;
+			remoteRef = CE47126F1EFC668B00D9E059 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		CE4712721EFC668B00D9E059 /* libyoga.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libyoga.a;
+			remoteRef = CE4712711EFC668B00D9E059 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		CE4712741EFC668B00D9E059 /* libyoga.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libyoga.a;
+			remoteRef = CE4712731EFC668B00D9E059 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		CE4712761EFC668B00D9E059 /* libcxxreact.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libcxxreact.a;
+			remoteRef = CE4712751EFC668B00D9E059 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		CE4712781EFC668B00D9E059 /* libcxxreact.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libcxxreact.a;
+			remoteRef = CE4712771EFC668B00D9E059 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		CE47127A1EFC668B00D9E059 /* libjschelpers.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libjschelpers.a;
+			remoteRef = CE4712791EFC668B00D9E059 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		CE47127C1EFC668B00D9E059 /* libjschelpers.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libjschelpers.a;
+			remoteRef = CE47127B1EFC668B00D9E059 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
 		CEBA95221C1BA47900C0B2E0 /* libSmartSync.a */ = {
 			isa = PBXReferenceProxy;
 			fileType = archive.ar;
@@ -385,6 +501,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CE4712671EFC668A00D9E059 /* SFSDKReactLogger.m in Sources */,
 				CE4CE4671C0E5B9D009F6029 /* SFSmartSyncReactBridge.m in Sources */,
 				CE4CE4691C0E5BC0009F6029 /* SFNetReactBridge.m in Sources */,
 				CE4CE4661C0E5B93009F6029 /* SFSmartStoreReactBridge.m in Sources */,
@@ -400,13 +517,35 @@
 			name = React;
 			targetProxy = CE4CE4B11C0E611A009F6029 /* PBXContainerItemProxy */;
 		};
+		CE81A9AC1E9C251100F3D0AD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = SmartSync;
+			targetProxy = CE81A9AB1E9C251100F3D0AD /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		4F3618A21AA51E3900AE3A65 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(BUILT_PRODUCTS_DIR)/Headers",
 					"$(TARGET_BUILD_DIR)/Headers",
@@ -419,6 +558,23 @@
 		4F3618A31AA51E3900AE3A65 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(BUILT_PRODUCTS_DIR)/Headers",
 					"$(TARGET_BUILD_DIR)/Headers",
@@ -448,6 +604,7 @@
 			baseConfigurationReference = CECB66341C1BB8F3008038AE /* SalesforceReact-Dynamic-iOS-Debug.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				BUILD_VERSION_SUFFIX = "";
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
@@ -461,9 +618,8 @@
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
@@ -486,7 +642,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = SalesforceReact/Info.plist;
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 9.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				MTL_ENABLE_DEBUG_INFO = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.salesforce.mobilesdk.SalesforceReact;
@@ -504,6 +660,7 @@
 			baseConfigurationReference = CECB66351C1BB8F3008038AE /* SalesforceReact-Dynamic-iOS-Release.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				BUILD_VERSION_SUFFIX = "";
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
@@ -517,9 +674,8 @@
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
@@ -537,7 +693,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = SalesforceReact/Info.plist;
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 9.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				MTL_ENABLE_DEBUG_INFO = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.salesforce.mobilesdk.SalesforceReact;

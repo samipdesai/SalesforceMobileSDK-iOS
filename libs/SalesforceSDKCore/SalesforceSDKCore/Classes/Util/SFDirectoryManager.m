@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012-2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -25,12 +25,13 @@
 #import "SFDirectoryManager.h"
 #import "SFUserAccountManager.h"
 #import "SFUserAccount.h"
-
-#import "SFSDKDatasharingHelper.h"
 #import "SFFileProtectionHelper.h"
+#import <SalesforceAnalytics/SFSDKDatasharingHelper.h>
 
 static NSString * const kDefaultOrgName = @"org";
 static NSString * const kDefaultCommunityName = @"internal";
+static NSString * const kSharedLibraryLocation = @"Library";
+static NSString * const kFilesSharedKey = @"filesShared";
 
 @implementation SFDirectoryManager
 
@@ -71,11 +72,12 @@ static NSString * const kDefaultCommunityName = @"internal";
 - (NSString*)directoryForOrg:(NSString*)orgId user:(NSString*)userId community:(NSString*)communityId type:(NSSearchPathDirectory)type components:(NSArray*)components {
     NSString *directory;
     
-    //we are only sharing library directory with the app extension other directory contents dont need to be shared.
-    if ([SFSDKDatasharingHelper sharedInstance].appGroupEnabled && type == NSLibraryDirectory) {
+    if ([SFSDKDatasharingHelper sharedInstance].appGroupEnabled){
         NSURL *sharedURL = [[NSFileManager defaultManager] containerURLForSecurityApplicationGroupIdentifier:[SFSDKDatasharingHelper sharedInstance].appGroupName];
         directory = [sharedURL path];
         directory = [directory stringByAppendingPathComponent:[SFSDKDatasharingHelper sharedInstance].appGroupName];
+        if(type == NSLibraryDirectory)
+            directory = [directory stringByAppendingPathComponent:kSharedLibraryLocation];
     } else {
         NSArray *directories = NSSearchPathForDirectoriesInDomains(type, NSUserDomainMask, YES);
         if (directories.count > 0) {
@@ -115,21 +117,21 @@ static NSString * const kDefaultCommunityName = @"internal";
             
         case SFUserAccountScopeOrg:
             if (!user.credentials.organizationId) {
-                [self log:SFLogLevelWarning format:@"Credentials missing for user %@ ", user];
+                [SFSDKCoreLogger w:[self class] format:@"Credentials missing for user %@ ", user];
                 return nil;
             }
             return [self directoryForOrg:user.credentials.organizationId user:nil community:nil type:type components:components];
             
         case SFUserAccountScopeUser:
             if (!user.credentials.organizationId || !user.credentials.userId) {
-                [self log:SFLogLevelWarning format:@"Credentials missing for user %@ ", user];
+                [SFSDKCoreLogger w:[self class] format:@"Credentials missing for user %@ ", user];
                 return nil;
             }
             return [self directoryForOrg:user.credentials.organizationId user:user.credentials.userId community:nil type:type components:components];
             
         case SFUserAccountScopeCommunity:
             if (!user.credentials.organizationId || !user.credentials.userId) {
-                [self log:SFLogLevelWarning format:@"Credentials missing for user %@", user];
+                [SFSDKCoreLogger w:[self class] format:@"Credentials missing for user %@ ", user];
                 return nil;
             }
             // Note: if the user communityId is nil, we use the default (internal) name for it.
@@ -140,7 +142,7 @@ static NSString * const kDefaultCommunityName = @"internal";
 - (NSString*)directoryForUser:(SFUserAccount*)user type:(NSSearchPathDirectory)type components:(NSArray*)components {
     if (user) {
         if (!user.credentials.organizationId || !user.credentials.userId) {
-            [self log:SFLogLevelWarning format:@"Credentials missing for user %@", user];
+                [SFSDKCoreLogger w:[self class] format:@"Credentials missing for user %@ ", user];
             return nil;
         }
         // Note: if the user communityId is nil, we use the default (internal) name for it.
@@ -161,7 +163,7 @@ static NSString * const kDefaultCommunityName = @"internal";
 #pragma mark - File Migration Methods
 
 - (void)moveContentsOfDirectory:(NSString *)sourceDirectory toDirectory:(NSString *)destinationDirectory {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSFileManager *fileManager = [[NSFileManager alloc]init];
     NSError *error = nil;
     if (sourceDirectory && [fileManager fileExistsAtPath:sourceDirectory]) {
         [SFDirectoryManager ensureDirectoryExists:destinationDirectory error:nil];
@@ -169,16 +171,17 @@ static NSString * const kDefaultCommunityName = @"internal";
         NSArray *rootContents = [fileManager contentsOfDirectoryAtPath:sourceDirectory error:&error];
         if (nil == rootContents) {
             if (error) {
-                [self log:SFLogLevelDebug format:@"Unable to enumerate the content at %@: %@", sourceDirectory, error];
+                [SFSDKCoreLogger d:[self class] format:@"Unable to enumerate the content at %@: %@", sourceDirectory, error];
             }
         } else {
             for (NSString *s in rootContents) {
                 NSString *newFilePath = [destinationDirectory stringByAppendingPathComponent:s];
                 NSString *oldFilePath = [sourceDirectory stringByAppendingPathComponent:s];
                 if (![fileManager fileExistsAtPath:newFilePath]) {
-                    //File does not exist, copy it
+
+                    // File does not exist, copy it.
                     if (![fileManager moveItemAtPath:oldFilePath toPath:newFilePath error:&error]) {
-                        [self log:SFLogLevelError format:@"Could not move library directory contents to a shared location for app group access: %@", error];
+                        [SFSDKCoreLogger e:[self class] format:@"Could not move library directory contents to a shared location for app group access: %@", error];
                     }
                 } else {
                     [fileManager removeItemAtPath:newFilePath error:&error];
@@ -193,26 +196,45 @@ static NSString * const kDefaultCommunityName = @"internal";
     //Migrate Files
     NSUserDefaults *sharedDefaults = [[NSUserDefaults alloc] initWithSuiteName:[SFSDKDatasharingHelper sharedInstance].appGroupName];
     BOOL isGroupAccessEnabled = [SFSDKDatasharingHelper sharedInstance].appGroupEnabled;
-    BOOL filesShared = [sharedDefaults boolForKey:@"filesShared"];
+    BOOL filesShared = [sharedDefaults boolForKey:kFilesSharedKey];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *libraryDirectory;
-    NSArray *directories = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+    NSString *docDirectory,*libDirectory;
+
+    NSArray *directories = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSArray *libDirectories = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+
     if (directories.count > 0) {
-        libraryDirectory = [directories[0] stringByAppendingPathComponent:[NSBundle mainBundle].bundleIdentifier];
+        docDirectory = [directories[0] stringByAppendingPathComponent:[NSBundle mainBundle].bundleIdentifier];
     }
     
     NSURL *sharedURL = [fileManager containerURLForSecurityApplicationGroupIdentifier:[SFSDKDatasharingHelper sharedInstance].appGroupName];
     NSString *sharedDirectory = [sharedURL path];
     sharedDirectory = [sharedDirectory stringByAppendingPathComponent:[SFSDKDatasharingHelper sharedInstance].appGroupName];
-    
-    if (isGroupAccessEnabled && !filesShared) {
-        [self moveContentsOfDirectory:libraryDirectory toDirectory:sharedDirectory];
-        [sharedDefaults setBool:YES forKey:@"filesShared"];
-    } else if (!isGroupAccessEnabled && filesShared) {
-        [self moveContentsOfDirectory:sharedDirectory toDirectory:libraryDirectory];
-        [sharedDefaults setBool:NO forKey:@"filesShared"];
+    if (libDirectories.count > 0) {
+        libDirectory = [libDirectories[0] stringByAppendingPathComponent:[NSBundle mainBundle].bundleIdentifier];
     }
+    
+    if( isGroupAccessEnabled || filesShared ) {
+        NSURL *sharedURL = [fileManager containerURLForSecurityApplicationGroupIdentifier:[SFSDKDatasharingHelper sharedInstance].appGroupName];
+        NSString *sharedDirectory = [sharedURL path];
+        NSString *sharedLibDirectory = nil;
+        sharedDirectory = [sharedDirectory stringByAppendingPathComponent:[SFSDKDatasharingHelper sharedInstance].appGroupName];
+        sharedLibDirectory = [sharedDirectory stringByAppendingPathComponent:kSharedLibraryLocation];
+        
+        if (isGroupAccessEnabled && !filesShared) {
+            //move files from Docs to the Shared & App Libs to Shared,Shared Library location
+            [self moveContentsOfDirectory:libDirectory toDirectory:sharedLibDirectory];
+            [self moveContentsOfDirectory:docDirectory toDirectory:sharedDirectory];
+            [sharedDefaults setBool:YES forKey:kFilesSharedKey];
+        } else if (!isGroupAccessEnabled && filesShared) {
+            //move files back from Sahred Location to  Library and the Docs
+            [self moveContentsOfDirectory:sharedLibDirectory toDirectory:libDirectory];
+            [self moveContentsOfDirectory:sharedDirectory toDirectory:docDirectory];
+            [sharedDefaults setBool:NO forKey:kFilesSharedKey];
+        }
+    }
+    
     [sharedDefaults synchronize];
 }
 

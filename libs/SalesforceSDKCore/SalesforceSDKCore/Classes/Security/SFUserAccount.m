@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012-2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -28,6 +28,7 @@
 #import "SFOAuthCredentials.h"
 #import "SFCommunityData.h"
 #import "SFIdentityData.h"
+#import "SFSDKAppFeatureMarkers.h"
 
 static NSString * const kUser_ACCESS_SCOPES       = @"accessScopes";
 static NSString * const kUser_CREDENTIALS         = @"credentials";
@@ -39,11 +40,10 @@ static NSString * const kUser_COMMUNITY_ID        = @"communityId";
 static NSString * const kUser_COMMUNITIES         = @"communities";
 static NSString * const kUser_ID_DATA             = @"idData";
 static NSString * const kUser_CUSTOM_DATA         = @"customData";
-static NSString * const kUser_IS_GUEST_USER       = @"guestUser";
 static NSString * const kUser_ACCESS_RESTRICTIONS = @"accessRestrictions";
-
 static NSString * const kCredentialsUserIdPropName = @"userId";
 static NSString * const kCredentialsOrgIdPropName = @"organizationId";
+static NSString * const kSFAppFeatureOAuth = @"UA";
 
 static const char * kSyncQueue = "com.salesforce.mobilesdk.sfuseraccount.syncqueue";
 /** Key that identifies the global scope
@@ -58,7 +58,6 @@ static NSString * const kGlobalScopingKey = @"-global-";
 }
 
 @property (nonatomic, strong) NSMutableDictionary *customData;
-@property (nonatomic, readwrite, getter = isGuestUser) BOOL guestUser;
 
 - (id)initWithCoder:(NSCoder*)decoder NS_DESIGNATED_INITIALIZER;
 
@@ -79,36 +78,24 @@ static NSString * const kGlobalScopingKey = @"-global-";
 }
 
 - (instancetype)init {
-    return [self initWithIdentifier:[SFUserAccountManager sharedInstance].oauthClientId];
+    return [self initWithCredentials:[SFOAuthCredentials new]];
 }
 
-- (instancetype)initWithIdentifier:(NSString*)identifier {
-    return [self initWithIdentifier:identifier clientId:[SFUserAccountManager sharedInstance].oauthClientId];
-}
-
-- (instancetype)initWithIdentifier:(NSString*)identifier clientId:(NSString*)clientId {
+- (instancetype)initWithCredentials:(SFOAuthCredentials*) credentials {
     self = [super init];
     if (self) {
         _observingCredentials = NO;
-        SFOAuthCredentials *creds = [[SFOAuthCredentials alloc] initWithIdentifier:identifier clientId:clientId encrypted:YES];
-        [SFUserAccountManager applyCurrentLogLevel:creds];
-        self.credentials = creds;
+        self.credentials = credentials;
+        _loginState = (credentials.refreshToken.length > 0 ? SFUserAccountLoginStateLoggedIn : SFUserAccountLoginStateNotLoggedIn);
         _syncQueue = dispatch_queue_create(kSyncQueue, NULL);
+        if (_loginState == SFUserAccountLoginStateLoggedIn) {
+            [SFSDKAppFeatureMarkers registerAppFeature:kSFAppFeatureOAuth];
+        }
     }
     return self;
 }
 
-- (instancetype)initWithGuestUser {
-    self = [super init];
-    if (self) {
-        self.guestUser = YES;
-        _syncQueue = dispatch_queue_create(kSyncQueue, NULL);
-    }
-    return self;
-}
-
-- (void)dealloc
-{
+- (void)dealloc {
     if (_observingCredentials) {
         [self.credentials removeObserver:self forKeyPath:kCredentialsUserIdPropName];
         [self.credentials removeObserver:self forKeyPath:kCredentialsOrgIdPropName];
@@ -125,13 +112,11 @@ static NSString * const kGlobalScopingKey = @"-global-";
     [encoder encodeObject:_idData forKey:kUser_ID_DATA];
     [encoder encodeObject:_communityId forKey:kUser_COMMUNITY_ID];
     [encoder encodeObject:_communities forKey:kUser_COMMUNITIES];
-    
     __weak __typeof(self) weakSelf = self;
     dispatch_sync(_syncQueue, ^{
         [encoder encodeObject:weakSelf.customData forKey:kUser_CUSTOM_DATA];
     });
     
-    [encoder encodeBool:_guestUser forKey:kUser_IS_GUEST_USER];
     [encoder encodeInteger:_accessRestrictions forKey:kUser_ACCESS_RESTRICTIONS];
 }
 
@@ -148,9 +133,12 @@ static NSString * const kGlobalScopingKey = @"-global-";
         _communityId      = [decoder decodeObjectOfClass:[NSString class] forKey:kUser_COMMUNITY_ID];
         _communities      = [decoder decodeObjectOfClass:[NSArray class] forKey:kUser_COMMUNITIES];
         _customData       = [[decoder decodeObjectOfClass:[NSDictionary class] forKey:kUser_CUSTOM_DATA] mutableCopy];
-        _guestUser        = [decoder decodeBoolForKey:kUser_IS_GUEST_USER];
         _accessRestrictions = [decoder decodeIntegerForKey:kUser_ACCESS_RESTRICTIONS];
+        _loginState = (_credentials.refreshToken.length > 0 ? SFUserAccountLoginStateLoggedIn : SFUserAccountLoginStateNotLoggedIn);
         _syncQueue = dispatch_queue_create(kSyncQueue, NULL);
+        if (_loginState == SFUserAccountLoginStateLoggedIn) {
+            [SFSDKAppFeatureMarkers registerAppFeature:kSFAppFeatureOAuth];
+        }
 	}
 	return self;
 }
@@ -218,12 +206,12 @@ static NSString * const kGlobalScopingKey = @"-global-";
         NSFileManager *fm = [NSFileManager defaultManager];
         if ([fm fileExistsAtPath:photoPath]) {
             if (![fm removeItemAtPath:photoPath error:&error]) {
-                [self log:SFLogLevelError format:@"Unable to remove previous photo from disk: %@", error];
+                [SFSDKCoreLogger e:[self class] format:@"Unable to remove previous photo from disk: %@", error];
             }
         }
         NSData *data = UIImagePNGRepresentation(photo);
         if (![data writeToFile:photoPath options:NSDataWritingAtomic error:&error]) {
-            [self log:SFLogLevelError format:@"Unable to write photo to disk: %@", error];
+            [SFSDKCoreLogger e:[self class] format:@"Unable to write photo to disk: %@", error];
         }
         
         [self willChangeValueForKey:@"photo"];
@@ -266,20 +254,22 @@ static NSString * const kGlobalScopingKey = @"-global-";
 - (void)setCustomDataObject:(id<NSCoding>)object forKey:(id<NSCopying>)key {
     __weak __typeof(self) weakSelf = self;
     dispatch_sync(_syncQueue, ^{
-        if(!weakSelf.customData) {
-            weakSelf.customData = [NSMutableDictionary dictionary];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if(!strongSelf.customData) {
+            strongSelf.customData = [NSMutableDictionary dictionary];
         }
-        [weakSelf.customData setObject:object forKey:key];
+        [strongSelf.customData setObject:object forKey:key];
     });
 }
 
 - (void)removeCustomDataObjectForKey:(id)key {
     __weak __typeof(self) weakSelf = self;
     dispatch_sync(_syncQueue, ^{
-        if(!weakSelf.customData) {
-            weakSelf.customData = [NSMutableDictionary dictionary];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if(!strongSelf.customData) {
+            strongSelf.customData = [NSMutableDictionary dictionary];
         }
-        [weakSelf.customData removeObjectForKey:key];
+        [strongSelf.customData removeObjectForKey:key];
     });
 }
 
@@ -287,12 +277,38 @@ static NSString * const kGlobalScopingKey = @"-global-";
     __weak __typeof(self) weakSelf = self;
     __block id object;
     dispatch_sync(_syncQueue, ^{
-        if(!weakSelf.customData) {
-            weakSelf.customData = [NSMutableDictionary dictionary];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if(!strongSelf.customData) {
+            strongSelf.customData = [NSMutableDictionary dictionary];
         }
-        object = [weakSelf.customData objectForKey:key];
+        object = [strongSelf.customData objectForKey:key];
     });
     return object;
+}
+
+- (BOOL)transitionToLoginState:(SFUserAccountLoginState)newLoginState {
+    __block BOOL transitionSucceeded;
+    dispatch_sync(_syncQueue, ^{
+        switch (newLoginState) {
+            case SFUserAccountLoginStateLoggedIn:
+                transitionSucceeded = (self.loginState == SFUserAccountLoginStateNotLoggedIn || self.loginState == SFUserAccountLoginStateLoggedIn);
+                break;
+            case SFUserAccountLoginStateNotLoggedIn:
+                transitionSucceeded = (self.loginState == SFUserAccountLoginStateNotLoggedIn || self.loginState == SFUserAccountLoginStateLoggingOut);
+                break;
+            case SFUserAccountLoginStateLoggingOut:
+                transitionSucceeded = (self.loginState == SFUserAccountLoginStateLoggedIn);
+                break;
+            default:
+                transitionSucceeded = NO;
+        }
+        if (transitionSucceeded) {
+            self.loginState = newLoginState;
+        } else {
+            [SFSDKCoreLogger w:[self class] format:@"%@ Invalid login state transition from '%@' to '%@'. No action taken.", NSStringFromSelector(_cmd), [[self class] loginStateDescriptionFromLoginState:self.loginState], [[self class] loginStateDescriptionFromLoginState:newLoginState]];
+        }
+    });
+    return transitionSucceeded;
 }
 
 - (BOOL)isSessionValid {
@@ -302,14 +318,7 @@ static NSString * const kGlobalScopingKey = @"-global-";
     return self.credentials.accessToken != nil && self.idData != nil;
 }
 
-- (BOOL)isTemporaryUser {
-    return ([self.accountIdentity.userId isEqualToString:SFUserAccountManagerTemporaryUserAccountUserId] &&
-           [self.accountIdentity.orgId isEqualToString:SFUserAccountManagerTemporaryUserAccountOrgId]);
-}
 
-- (BOOL)isAnonymousUser {
-    return [SFUserAccountManager isUserAnonymous:self];
-}
 
 - (NSString*)description {
     NSString *theUserName = @"*****";
@@ -323,6 +332,19 @@ static NSString * const kGlobalScopingKey = @"-global-";
     NSString * s = [NSString stringWithFormat:@"<SFUserAccount username=%@ fullName=%@ accessScopes=%@ credentials=%@, community=%@>",
                     theUserName, theFullName, self.accessScopes, self.credentials, self.communityId];
     return s;
+}
+
++ (NSString *)loginStateDescriptionFromLoginState:(SFUserAccountLoginState)loginState {
+    switch (loginState) {
+        case SFUserAccountLoginStateLoggedIn:
+            return @"SFUserAccountLoginStateLoggedIn";
+        case SFUserAccountLoginStateLoggingOut:
+            return @"SFUserAccountLoginStateLoggingOut";
+        case SFUserAccountLoginStateNotLoggedIn:
+            return @"SFUserAccountLoginStateNotLoggedIn";
+        default:
+            return [NSString stringWithFormat:@"Unknown login state (code: %lu)", (unsigned long)loginState];
+    }
 }
 
 NSString *SFKeyForUserAndScope(SFUserAccount *user, SFUserAccountScope scope) {

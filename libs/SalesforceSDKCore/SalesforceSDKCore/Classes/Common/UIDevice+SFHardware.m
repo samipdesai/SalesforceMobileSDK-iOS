@@ -10,13 +10,10 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #import <mach/mach.h>
-
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
-
 #import "UIDevice+SFHardware.h"
 #import "UIScreen+SFAdditions.h"
-#import "SFLogger.h"
 #import "SFApplicationHelper.h"
 
 @implementation UIDevice (SFHardware)
@@ -160,6 +157,68 @@
     return [self getSysInfo:HW_NCPU];
 }
 
+- (float) totalCPU
+{
+    kern_return_t kr;
+    task_info_data_t tinfo;
+    mach_msg_type_number_t task_info_count;
+    
+    task_info_count = TASK_INFO_MAX;
+    kr = task_info(mach_task_self(), TASK_BASIC_INFO, (task_info_t)tinfo, &task_info_count);
+    if (kr != KERN_SUCCESS) {
+        return -1;
+    }
+    
+    task_basic_info_t      basic_info;
+    thread_array_t         thread_list;
+    mach_msg_type_number_t thread_count;
+    
+    thread_info_data_t     thinfo;
+    mach_msg_type_number_t thread_info_count;
+    
+    thread_basic_info_t basic_info_th;
+    uint32_t stat_thread = 0; // Mach threads
+    
+    basic_info = (task_basic_info_t)tinfo;
+    
+    // get threads in the task
+    kr = task_threads(mach_task_self(), &thread_list, &thread_count);
+    if (kr != KERN_SUCCESS) {
+        return -1;
+    }
+    if (thread_count > 0)
+        stat_thread += thread_count;
+    
+    long tot_sec = 0;
+    long tot_usec = 0;
+    float tot_cpu = 0;
+    int j;
+    
+    for (j = 0; j < thread_count; j++)
+    {
+        thread_info_count = THREAD_INFO_MAX;
+        kr = thread_info(thread_list[j], THREAD_BASIC_INFO,
+                         (thread_info_t)thinfo, &thread_info_count);
+        if (kr != KERN_SUCCESS) {
+            return -1;
+        }
+        
+        basic_info_th = (thread_basic_info_t)thinfo;
+        
+        if (!(basic_info_th->flags & TH_FLAGS_IDLE)) {
+            tot_sec = tot_sec + basic_info_th->user_time.seconds + basic_info_th->system_time.seconds;
+            tot_usec = tot_usec + basic_info_th->user_time.microseconds + basic_info_th->system_time.microseconds;
+            tot_cpu = tot_cpu + basic_info_th->cpu_usage / (float)TH_USAGE_SCALE * 100.0;
+        }
+        
+    } // for each thread
+    
+    kr = vm_deallocate(mach_task_self(), (vm_offset_t)thread_list, thread_count * sizeof(thread_t));
+    assert(kr == KERN_SUCCESS);
+    
+    return tot_cpu;
+}
+
 - (NSUInteger) totalMemory
 {
     return [self getSysInfo:HW_PHYSMEM];
@@ -246,6 +305,11 @@
     if ([platform isEqualToString:@"iPhone7,2"])    return UIDevice6iPhone;
     if ([platform isEqualToString:@"iPhone8,1"])    return UIDevice6siPhone;
     if ([platform isEqualToString:@"iPhone8,2"])    return UIDevice6sPlusiPhone;
+    if ([platform isEqualToString:@"iPhone8,4"])    return UIDeviceSEiPhone;
+    if ([platform isEqualToString:@"iPhone9,1"])    return UIDevice7iPhone;
+    if ([platform isEqualToString:@"iPhone9,2"])    return UIDevice7PlusiPhone;
+    if ([platform isEqualToString:@"iPhone9,3"])    return UIDevice7iPhone;
+    if ([platform isEqualToString:@"iPhone9,4"])    return UIDevice7PlusiPhone;
     
     // iPod
     if ([platform hasPrefix:@"iPod1"])              return UIDevice1GiPod;
@@ -285,6 +349,12 @@
     
     if ([platform isEqualToString:@"iPad5,3"])      return UIDevice2GiPadAir;
     if ([platform isEqualToString:@"iPad5,4"])      return UIDevice2GiPadAir;
+    
+    if ([platform isEqualToString:@"iPad6,3"])      return UIDevice97InchiPadPro;
+    if ([platform isEqualToString:@"iPad6,4"])      return UIDevice97InchiPadPro;
+    if ([platform isEqualToString:@"iPad6,7"])      return UIDevice129InchiPadPro;
+    if ([platform isEqualToString:@"iPad6,8"])      return UIDevice129InchiPadPro;
+    
     
     // Apple TV
     if ([platform hasPrefix:@"AppleTV2"])           return UIDeviceAppleTV2;
@@ -330,6 +400,9 @@
         case UIDevice6PlusiPhone: return IPHONE_6P_NAMESTRING;
         case UIDevice6siPhone: return IPHONE_6s_NAMESTRING;
         case UIDevice6sPlusiPhone: return IPHONE_6sP_NAMESTRING;
+        case UIDeviceSEiPhone: return IPHONE_SE_NAMESTRING;
+        case UIDevice7iPhone: return IPHONE_7_NAMESTRING;
+        case UIDevice7PlusiPhone: return IPHONE_7P_NAMESTRING;
         case UIDeviceUnknowniPhone: return IPHONE_UNKNOWN_NAMESTRING;
             
         case UIDevice1GiPod: return IPOD_1G_NAMESTRING;
@@ -347,6 +420,8 @@
         case UIDevice1GiPadMini: return  IPAD_MINI_1G_NAMESTRING;
         case UIDevice2GiPadMini: return  IPAD_MINI_2G_NAMESTRING;
         case UIDevice3GiPadMini: return  IPAD_MINI_3G_NAMESTRING;
+        case UIDevice97InchiPadPro: return  IPAD_PRO_9_7_INCH_NAMESTRING;
+        case UIDevice129InchiPadPro: return  IPAD_PRO_12_9_INCH_NAMESTRING;
         case UIDeviceUnknowniPad : return IPAD_UNKNOWN_NAMESTRING;
             
         case UIDeviceAppleTV2 : return APPLETV_2G_NAMESTRING;
@@ -403,25 +478,25 @@
     if ((mib[5] = if_nametoindex("en0")) == 0) {
         // we've only seen this case when running on Jenkins where the simulator shares the server's ifaces (ifconfig)
         // to fix this, we will try to find en1 which hopefully also exists.
-        [self log:SFLogLevelWarning msg:@"if_nametoindex could not find en0, trying en1"];
+        [SFSDKCoreLogger w:[self class] format:@"if_nametoindex could not find en0, trying en1"];
         if ((mib[5] = if_nametoindex("en1")) == 0) {
-            [self log:SFLogLevelError msg:@"if_nametoindex error"];
+            [SFSDKCoreLogger e:[self class] format:@"if_nametoindex error"];
             return NULL;
         }
     }
     
     if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
-        [self log:SFLogLevelError msg:@"sysctl, take 1"];
+        [SFSDKCoreLogger e:[self class] format:@"sysctl, take 1"];
         return NULL;
     }
     
     if ((buf = malloc(len)) == NULL) {
-        [self log:SFLogLevelError msg:@"Memory allocation error"];
+        [SFSDKCoreLogger e:[self class] format:@"Memory allocation error"];
         return NULL;
     }
     
     if (sysctl(mib, 6, buf, &len, NULL, 0) < 0) {
-        [self log:SFLogLevelError msg:@"sysctl, take 2"];
+        [SFSDKCoreLogger e:[self class] format:@"sysctl, take 2"];
         free(buf); // Thanks, Remy "Psy" Demerest
         return NULL;
     }
@@ -442,6 +517,14 @@
         orientation = [[SFApplicationHelper sharedApplication] statusBarOrientation];
     }
     return orientation;
+}
+
++ (BOOL)currentDeviceIsIPad {
+    return (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad);
+}
+
++ (BOOL)currentDeviceIsIPhone {
+    return (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPhone);
 }
 
 - (BOOL)isSimulator {

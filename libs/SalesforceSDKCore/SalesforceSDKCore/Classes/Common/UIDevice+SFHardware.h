@@ -20,6 +20,9 @@
 #define IPHONE_6P_NAMESTRING            @"iPhone 6+"
 #define IPHONE_6s_NAMESTRING             @"iPhone 6s"
 #define IPHONE_6sP_NAMESTRING            @"iPhone 6s+"
+#define IPHONE_SE_NAMESTRING            @"iPhone SE"
+#define IPHONE_7_NAMESTRING            @"iPhone 7"
+#define IPHONE_7P_NAMESTRING            @"iPhone 7P"
 #define IPHONE_UNKNOWN_NAMESTRING       @"Unknown iPhone"
 
 #define IPOD_1G_NAMESTRING              @"iPod touch 1G"
@@ -34,6 +37,8 @@
 #define IPAD_4G_NAMESTRING              @"iPad 4G"
 #define IPAD_AIR_1G_NAMESTRING          @"iPad Air 1G"
 #define IPAD_AIR_2G_NAMESTRING          @"iPad Air 2G"
+#define IPAD_PRO_9_7_INCH_NAMESTRING    @"iPad Pro (9.7 inch)"
+#define IPAD_PRO_12_9_INCH_NAMESTRING   @"iPad Pro (12.9 inch)"
 
 #define IPAD_UNKNOWN_NAMESTRING         @"Unknown iPad"
 
@@ -75,6 +80,9 @@ typedef NS_ENUM(NSUInteger, UIDevicePlatform) {
     UIDevice6PlusiPhone,
     UIDevice6siPhone,
     UIDevice6sPlusiPhone,
+    UIDeviceSEiPhone,
+    UIDevice7iPhone,
+    UIDevice7PlusiPhone,
     
     UIDevice1GiPod,
     UIDevice2GiPod,
@@ -91,6 +99,9 @@ typedef NS_ENUM(NSUInteger, UIDevicePlatform) {
     UIDevice1GiPadMini,
     UIDevice2GiPadMini,
     UIDevice3GiPadMini,
+    
+    UIDevice97InchiPadPro,
+    UIDevice129InchiPadPro,
     
     UIDeviceAppleTV2,
     UIDeviceAppleTV3,
@@ -146,6 +157,9 @@ typedef NS_ENUM(NSUInteger, UIDeviceFamily) {
 /**CPU Count*/
 - (NSUInteger) cpuCount;
 
+/**Total CUP*/
+- (float) totalCPU;
+
 /**Total memory*/
 - (NSUInteger) totalMemory;
 
@@ -199,5 +213,13 @@ typedef NS_ENUM(NSUInteger, UIDeviceFamily) {
  * @return Returns YES if so, NO otherwise.
  */
 - (BOOL)hasIphone6PlusScreenSize;
+
+/**Return YES if device is iPad
+ */
++ (BOOL)currentDeviceIsIPad;
+
+/**Return YES if device is iPhone
+ */
++ (BOOL)currentDeviceIsIPhone;
 
 @end

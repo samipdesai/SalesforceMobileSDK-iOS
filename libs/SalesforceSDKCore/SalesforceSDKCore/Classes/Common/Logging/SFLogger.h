@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -44,6 +44,7 @@ typedef NS_ENUM(NSUInteger, SFLogContext) {
     MobileSDKLogContext = 1
 } __attribute__((deprecated("Use logging identifiers instead")));
 
+@class DDLog;
 
 #define SFLogAssert(_cond, _desc, ...) \
 do { \
@@ -69,7 +70,7 @@ if (!(_cond)) { \
  * @param level The minimum log level to observe.
  * @param msg The message to log.
  */
-- (void)log:(SFLogLevel)level msg:(NSString *)msg;
+- (void)log:(SFLogLevel)level msg:(NSString *)msg SFSDK_DEPRECATED(5.2, 6.0, "Use SFSDKLogger instead.");
 
 /**
  * Logs a formatted message with the given log level and format parameters.
@@ -77,7 +78,7 @@ if (!(_cond)) { \
  * @param format The format message, and optional arguments to expand in the format.
  * @param ... The arguments to the message format string.
  */
-- (void)log:(SFLogLevel)level format:(NSString *)format, ...;
+- (void)log:(SFLogLevel)level format:(NSString *)format, ... SFSDK_DEPRECATED(5.2, 6.0, "Use SFSDKLogger instead.");
 
 /**
  * Log method with the addition of context.
@@ -85,7 +86,7 @@ if (!(_cond)) { \
  * @param logIdentifier Identifier to use when scoping the context of this log message.
  * @param msg The format message.
 */
-- (void)log:(SFLogLevel)level identifier:(NSString*)logIdentifier msg:(NSString *)msg;
+- (void)log:(SFLogLevel)level identifier:(NSString*)logIdentifier msg:(NSString *)msg SFSDK_DEPRECATED(5.2, 6.0, "Use SFSDKLogger instead.");
 
 /**
  * Log method with the addition of context
@@ -94,7 +95,7 @@ if (!(_cond)) { \
  * @param format The format message.
  * @param ... Optional arguments for the message format string.
  */
-- (void)log:(SFLogLevel)level identifier:(NSString*)logIdentifier format:(NSString *)format, ...;
+- (void)log:(SFLogLevel)level identifier:(NSString*)logIdentifier format:(NSString *)format, ... SFSDK_DEPRECATED(5.2, 6.0, "Use SFSDKLogger instead.");
 
 - (void)log:(SFLogLevel)level context:(SFLogContext)logContext msg:(NSString *)msg __attribute__((deprecated("Use log:identifier:msg: instead")));
 - (void)log:(SFLogLevel)level context:(SFLogContext)logContext format:(NSString *)format, ... __attribute__((deprecated("Use log:identifier:format: instead")));
@@ -132,9 +133,12 @@ if (!(_cond)) { \
  
  Alternatively once you register your identifier, you can use the SFLogErrorToIdentifier and other companion macros with the log identifier string, or you can use the log:level:identifier:format: method directly.  Furthermore, if your [NSObject loggingIdentifier] returns a valid log identifier string, the [NSObject log:msg:] and [NSObject log:format:] methods can be used as well, though those will incur additional performance overhead as well.
  */
+SFSDK_DEPRECATED(5.2, 6.0, "Use SFSDKLogger instead.")
 @interface SFLogger : NSObject
 
 + (instancetype)sharedLogger;
+
+@property (nonatomic, strong, readonly) DDLog *ddLog;
 
 @property (nonatomic, assign, getter=shouldLogToASL) BOOL logToASL;
 
@@ -231,11 +235,11 @@ if (!(_cond)) { \
            level:(SFLogLevel)level
             flag:(SFLogFlag)flag
          context:(NSInteger)context
-            file:(nullable const char *)file
-        function:(nullable const char *)function
+            file:(const char *)file
+        function:(const char *)function
             line:(NSUInteger)line
              tag:(nullable id)tag
-          format:(nullable NSString *)format, ...;
+         message:(NSString *)message;
 
 @end
 

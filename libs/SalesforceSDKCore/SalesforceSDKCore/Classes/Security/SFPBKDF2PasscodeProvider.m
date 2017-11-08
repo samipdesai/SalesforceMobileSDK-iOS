@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2013, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2013-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -76,16 +76,16 @@ static NSString * const kPBKDFArchiveDataKey = @"pbkdfDataArchive";
     
     // Sanity check data.
     if (passcodeData == nil) {
-        [self log:SFLogLevelError msg:@"No passcode data found.  Cannot verify passcode."];
+        [SFSDKCoreLogger e:[self class] format:@"No passcode data found.  Cannot verify passcode."];
         return NO;
     } else if (passcodeData.derivedKey == nil) {
-        [self log:SFLogLevelError msg:@"Passcode key has not been set.  Cannot verify passcode."];
+        [SFSDKCoreLogger e:[self class] format:@"Passcode key has not been set.  Cannot verify passcode."];
         return NO;
     } else if (passcodeData.salt == nil) {
-        [self log:SFLogLevelError msg:@"Passcode salt has not been set.  Cannot verify passcode."];
+        [SFSDKCoreLogger e:[self class] format:@"Passcode salt has not been set.  Cannot verify passcode."];
         return NO;
     } else if (passcodeData.numDerivationRounds == 0) {
-        [self log:SFLogLevelError msg:@"Number of derivation rounds has not been set.  Cannot verify passcode."];
+        [SFSDKCoreLogger e:[self class] format:@"Number of derivation rounds has not been set.  Cannot verify passcode."];
         return NO;
     }
     

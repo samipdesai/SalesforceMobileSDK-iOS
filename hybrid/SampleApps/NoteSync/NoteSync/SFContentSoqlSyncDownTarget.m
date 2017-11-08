@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -26,7 +26,7 @@
 #import <SmartSync/SFSmartSyncSyncManager.h>
 #import <SmartSync/SFSmartSyncConstants.h>
 #import <SmartSync/SFSmartSyncNetworkUtils.h>
-#import <SalesforceNetwork/CSFNetwork.h>
+#import <SalesforceSDKCore/CSFNetwork.h>
 #import <SalesforceSDKCore/SFAuthenticationManager.h>
 
 // SOAP request
@@ -178,7 +178,6 @@ typedef void (^SFSoapSoqlResponseParseComplete) ();
     self = [[self class] requestWithMethod:SFRestMethodPOST path:SOAP_PATH queryParams:nil];
     if (self) {
         self.endpoint = SOAP_ENDPOINT;
-        self.parseResponse = NO;
         self.query = query;
         self.queryLocator = nil;
     }
@@ -190,29 +189,25 @@ typedef void (^SFSoapSoqlResponseParseComplete) ();
     self = [[self class] requestWithMethod:SFRestMethodPOST path:@"" queryParams:nil];
     if (self) {
         self.endpoint = SOAP_ENDPOINT;
-        self.parseResponse = NO;
         self.query = nil;
         self.queryLocator = queryLocator;
     }
     return self;
 }
 
-- (void)prepareRequestForSend
+- (NSURLRequest *)prepareRequestForSend
 {
     NSString *sessionId = [SFAuthenticationManager sharedManager].coordinator.credentials.accessToken;
     NSString *body;
     if (self.queryLocator) {
         body = [NSString stringWithFormat:QUERY_MORE_TEMPLATE, self.queryLocator];
-    }
-    else {
+    } else {
         body = [NSString stringWithFormat:QUERY_TEMPLATE, self.query];
     }
     NSString *soapBody = [NSString stringWithFormat:REQUEST_TEMPLATE, sessionId, body];
     [self setCustomRequestBodyString:soapBody contentType:XML_MIME_TYPE];
-    
     [self setHeaderValue:SOAP_ACTION_VALUE forHeaderName:SOAP_ACTION];
-    
-    [super prepareRequestForSend];
+    return [super prepareRequestForSend];
 }
 
 @end
@@ -225,39 +220,15 @@ typedef void (^SFSoapSoqlResponseParseComplete) ();
 
 @implementation SFContentSoqlSyncDownTarget
 
-- (instancetype)initWithDict:(NSDictionary *)dict {
-    self = [super initWithDict:dict];
-    if (self) {
-        self.queryType = SFSyncDownTargetQueryTypeCustom;
-    }
-    return self;
-}
-
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        self.queryType = SFSyncDownTargetQueryTypeCustom;
-    }
-    return self;
-}
 
 #pragma mark - Factory methods
 
 + (SFContentSoqlSyncDownTarget*) newSyncTarget:(NSString*)query {
     SFContentSoqlSyncDownTarget* syncTarget = [[SFContentSoqlSyncDownTarget alloc] init];
-    syncTarget.queryType = SFSyncDownTargetQueryTypeCustom;
     syncTarget.query = query;
     return syncTarget;
 }
 
-
-#pragma mark - To dictionary
-
-- (NSMutableDictionary*) asDict {
-    NSMutableDictionary *dict = [super asDict];
-    dict[kSFSyncTargetiOSImplKey] = NSStringFromClass([self class]);
-    return dict;
-}
 
 # pragma mark - Data fetching
 
@@ -266,18 +237,13 @@ typedef void (^SFSoapSoqlResponseParseComplete) ();
          errorBlock:(SFSyncDownTargetFetchErrorBlock)errorBlock
       completeBlock:(SFSyncDownTargetFetchCompleteBlock)completeBlock
 {
-    __weak SFContentSoqlSyncDownTarget* weakSelf = self;
+    __weak typeof(self) weakSelf = self;
     
-    // Resync?
-    NSString* queryToRun = self.query;
-    if (maxTimeStamp > 0) {
-        queryToRun = [SFSoqlSyncDownTarget addFilterForReSync:self.query modDateFieldName:self.modificationDateFieldName maxTimeStamp:maxTimeStamp];
-    }
-    
+    NSString* queryToRun = [self getQueryToRun:maxTimeStamp];
     [[SFRestAPI sharedInstance] performRequestForResourcesWithFailBlock:errorBlock completeBlock:^(NSDictionary* d) { // cheap call to refresh session
         SFRestRequest* request = [[SFSoapSoqlRequest alloc] initWithQuery:queryToRun];
         [SFSmartSyncNetworkUtils sendRequestWithSmartSyncUserAgent:request failBlock:errorBlock completeBlock:^(NSData * response) {
-            __strong SFContentSoqlSyncDownTarget *strongSelf = weakSelf;
+            __strong typeof(weakSelf) strongSelf = weakSelf;
             [strongSelf parseRestResponse:response parseCompletion:^(SFSoapSoqlResponse *soapSoqlResponse) {
                 strongSelf.queryLocator = soapSoqlResponse.queryLocator;
                 strongSelf.totalSize = soapSoqlResponse.totalSize;
@@ -293,10 +259,10 @@ typedef void (^SFSoapSoqlResponseParseComplete) ();
          completeBlock:(SFSyncDownTargetFetchCompleteBlock)completeBlock
 {
     if (self.queryLocator) {
-        __weak SFContentSoqlSyncDownTarget* weakSelf = self;
+        __weak typeof(self) weakSelf = self;
         SFSoapSoqlRequest* request = [[SFSoapSoqlRequest alloc] initWithQueryLocator:self.queryLocator];
         [SFSmartSyncNetworkUtils sendRequestWithSmartSyncUserAgent:request failBlock:errorBlock completeBlock:^(NSData *response) {
-            __strong SFContentSoqlSyncDownTarget *strongSelf = weakSelf;
+            __strong typeof(weakSelf) strongSelf = weakSelf;
             [strongSelf parseRestResponse:response parseCompletion:^(SFSoapSoqlResponse *soapSoqlResponse) {
                 strongSelf.queryLocator = soapSoqlResponse.queryLocator;
                 completeBlock(soapSoqlResponse.records);

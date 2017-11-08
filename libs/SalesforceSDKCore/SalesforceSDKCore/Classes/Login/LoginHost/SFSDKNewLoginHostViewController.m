@@ -3,7 +3,7 @@
  SalesforceSDKCore
  
  Created by Kunal Chitalia on 1/22/16.
- Copyright (c) 2016, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2016-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -59,11 +59,9 @@ static NSString * const SFSDKNewLoginHostCellIdentifier = @"SFSDKNewLoginHostCel
     
     // Set the size of this view so any popover controller will resize to fit
     CGRect r = [self.tableView rectForSection:0];
-    
     CGSize size = CGSizeMake(380, r.size.height);
     self.preferredContentSize = size;
     self.loginHostListViewController.preferredContentSize = size;
-    
     self.preferredContentSize = size;
     
     // Make sure to also set the content size of the other view controller, otherwise the popover won't
@@ -77,7 +75,9 @@ static NSString * const SFSDKNewLoginHostCellIdentifier = @"SFSDKNewLoginHostCel
  * Invoked when the user taps on the done button to add the login host to the list of hosts.
  */
 - (void)addNewServer:(id)sender {
-    [self.loginHostListViewController addLoginHost:[SFSDKLoginHost hostWithName:self.name.text host:self.server.text deletable:YES]];
+    [self.loginHostListViewController addLoginHost:[SFSDKLoginHost hostWithName:[self.name.text stringByTrimmingCharactersInSet:
+                                                                                 [NSCharacterSet whitespaceCharacterSet]] host:[self.server.text stringByTrimmingCharactersInSet:
+                                                                                                     [NSCharacterSet whitespaceCharacterSet]] deletable:YES]];
 }
 
 #pragma mark - Table view data source
@@ -104,7 +104,6 @@ static NSString * const SFSDKNewLoginHostCellIdentifier = @"SFSDKNewLoginHostCel
         cell.textField.keyboardType = UIKeyboardTypeURL;
         cell.textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
         self.server = cell.textField;
-        
         [cell.textField becomeFirstResponder];
     } else {
         cell.textField.placeholder = [SFSDKResourceUtils localizedString:@"LOGIN_SERVER_NAME"];

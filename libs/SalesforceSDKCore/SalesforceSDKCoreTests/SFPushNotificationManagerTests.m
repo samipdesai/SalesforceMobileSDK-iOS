@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
 
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -50,8 +50,8 @@ static NSString* const kSFDeviceSalesforceId = @"deviceSalesforceId";
     [super setUp];
     self.manager = [[SFPushNotificationManager alloc] init];
     self.manager.isSimulator = NO;
-
-    SFUserAccount *user = [[SFUserAccount alloc] initWithIdentifier:@"happy-user"];
+    SFOAuthCredentials *credentials = [[SFOAuthCredentials alloc] initWithIdentifier:@"happy-user" clientId:[SFAuthenticationManager sharedManager].oauthClientId encrypted:YES];
+    SFUserAccount *user =[[SFUserAccount alloc] initWithCredentials:credentials];
     user.credentials.identityUrl = [NSURL URLWithString:@"https://login.salesforce.com/id/00D000000000062EA0/005R0000000Dsl0"];
     [SFUserAccountManager sharedInstance].currentUser = user;
 

@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2011, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2011-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -49,6 +49,18 @@
 - (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didFailWithError:(NSError *)error {
     // authentication is cancelled before a timeout can occur, so the test should not fail
     XCTFail(@"user agent authentication flow should not fail");
+}
+
+- (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didBeginAuthenticationWithSafariViewController:(SFSafariViewController *)svc {
+
+    // Safari auth flow is not supported in unit test framework.
+    XCTFail(@"Safari auth flow is not supported in unit test framework");
+}
+
+- (void)oauthCoordinatorDidCancelBrowserAuthentication:(SFOAuthCoordinator *)coordinator {
+
+    // Safari auth flow is not supported in unit test framework.
+    XCTFail(@"Safari auth flow is not supported in unit test framework");
 }
 
 @end

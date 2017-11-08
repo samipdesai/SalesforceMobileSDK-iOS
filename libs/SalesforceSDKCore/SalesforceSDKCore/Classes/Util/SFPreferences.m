@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012-2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -59,7 +59,7 @@ static NSMutableDictionary *instances = nil;
                     prefs = [[SFPreferences alloc] initWithPath:[directory stringByAppendingPathComponent:kPreferencesFileName]];
                     instances[key] = prefs;
                 } else {
-                    [[self class] log:SFLogLevelError format:@"Unable to create scoped directory %@: %@", directory, error];
+                    [SFSDKCoreLogger e:[self class] format:@"Unable to create scoped directory %@: %@", directory, error];
                 }
             }            
         }
@@ -72,7 +72,7 @@ static NSMutableDictionary *instances = nil;
 }
 
 + (instancetype)currentOrgLevelPreferences {
-    SFUserAccount *user = [self currentValidUserAccount];
+    SFUserAccount *user = [SFUserAccountManager sharedInstance].currentUser;
     if (user) {
         return [self sharedPreferencesForScope:SFUserAccountScopeOrg user:user];
     } else {
@@ -81,7 +81,7 @@ static NSMutableDictionary *instances = nil;
 }
 
 + (instancetype)currentUserLevelPreferences {
-    SFUserAccount *user = [self currentValidUserAccount];
+    SFUserAccount *user = [SFUserAccountManager sharedInstance].currentUser;
     if (user) {
         return [self sharedPreferencesForScope:SFUserAccountScopeUser user:user];
     } else {
@@ -90,21 +90,9 @@ static NSMutableDictionary *instances = nil;
 }
 
 + (instancetype)currentCommunityLevelPreferences {
-    SFUserAccount *user = [self currentValidUserAccount];
+    SFUserAccount *user = [SFUserAccountManager sharedInstance].currentUser;
     if (user) {
         return [self sharedPreferencesForScope:SFUserAccountScopeCommunity user:user];
-    } else {
-        return nil;
-    }
-}
-
-/** Returns a SFUserAccount only if there is a current user and if that user
- is not the temporary user.
- */
-+ (SFUserAccount*)currentValidUserAccount {
-    SFUserAccountIdentity *userIdentity = [SFUserAccountManager sharedInstance].currentUserIdentity;
-    if (userIdentity && ![userIdentity isEqual:[SFUserAccountManager sharedInstance].temporaryUserIdentity]) {
-        return [SFUserAccountManager sharedInstance].currentUser;
     } else {
         return nil;
     }
@@ -142,7 +130,7 @@ static NSMutableDictionary *instances = nil;
             self.attributes[key] = object;
         }
         @catch (NSException *exception) {
-            [self log:SFLogLevelError format:@"Unable to set preference entry (key:%@, object:%@): %@", key, object, exception];
+            [SFSDKCoreLogger e:[self class] format:@"Unable to set preference entry (key:%@, object:%@): %@", key, object, exception];
         }
     }
 }
@@ -191,7 +179,7 @@ static NSMutableDictionary *instances = nil;
 - (void)synchronize {
     @synchronized (self) {
         if (![self.attributes writeToFile:self.path atomically:YES]) {
-            [self log:SFLogLevelError format:@"Unable to save preferences at %@", self.path];
+            [SFSDKCoreLogger e:[self class] format:@"Unable to save preferences at %@", self.path];
         }
     }
 }
@@ -203,7 +191,7 @@ static NSMutableDictionary *instances = nil;
             NSError *error = nil;
             BOOL success = [manager removeItemAtPath:self.path error:&error];
             if (!success) {
-                [self log:SFLogLevelError format:@"Unable to delete preferences at %@, error %@", self.path, [error localizedDescription]];
+                [SFSDKCoreLogger e:[self class] format:@"Unable to delete preferences at %@, error %@", self.path, [error localizedDescription]];
             }
         }
         [self.attributes removeAllObjects];

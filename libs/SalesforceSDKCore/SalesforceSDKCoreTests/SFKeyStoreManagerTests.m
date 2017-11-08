@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -36,8 +36,7 @@
 
 - (void)setUp {
     [super setUp];
-    [SFLogger sharedLogger].logLevel = SFLogLevelDebug;
-    
+
     // initialize passcode mgr
     [[SFPasscodeManager sharedManager] changePasscode: nil];
     
@@ -45,10 +44,8 @@
 }
 
 - (void)tearDown {
-    
     [super tearDown];
 }
-
 
 // ensure we get the same reference back for the shared instance
 - (void)testSingleton {
@@ -82,12 +79,14 @@
 
 // retrieve key with label, do not create one by default.
 - (void)testRetrieveKeyButDontCreateForGeneratedStore {
+    [mgr removeKeyWithLabel:@"myLabel" keyType:SFKeyStoreKeyTypeGenerated];
     SFEncryptionKey *key =[mgr retrieveKeyWithLabel:@"myLabel" keyType:SFKeyStoreKeyTypeGenerated autoCreate: NO];
     XCTAssertNil(key, @"Should not have created key");
 }
 
 // retrieve key with label, do not create one by default.
 - (void)testRetrieveKeyButDontCreateForPasscodeStore {
+     [mgr removeKeyWithLabel:@"myLabel" keyType:SFKeyStoreKeyTypePasscode];
     SFEncryptionKey *key =[mgr retrieveKeyWithLabel:@"myLabel" keyType:SFKeyStoreKeyTypePasscode autoCreate: NO];
     XCTAssertNil(key, @"Should not have created key");
 }

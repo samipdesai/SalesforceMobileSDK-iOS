@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2013, salesforce.com, inc. All rights reserved.
+  Copyright (c) 2013-present, salesforce.com, inc. All rights reserved.
  
   Redistribution and use of this software in source and binary forms, with or without modification,
   are permitted provided that the following conditions are met:
@@ -79,10 +79,15 @@
 - (SFUserAccount *)createUserAccount
 {
     u_int32_t userIdentifier = arc4random();
-    SFUserAccount *user = [[SFUserAccount alloc] initWithIdentifier:[NSString stringWithFormat:@"identifier-%u", userIdentifier]];
+    SFOAuthCredentials *credentials = [[SFOAuthCredentials alloc] initWithIdentifier:[NSString stringWithFormat:@"identifier-%u", userIdentifier] clientId:[SFAuthenticationManager sharedManager].oauthClientId encrypted:YES];
+    SFUserAccount *user =[[SFUserAccount alloc] initWithCredentials:credentials];
     NSString *userId = [NSString stringWithFormat:@"user_%u", userIdentifier];
     NSString *orgId = [NSString stringWithFormat:@"org_%u", userIdentifier];
     user.credentials.identityUrl = [NSURL URLWithString:[NSString stringWithFormat:@"https://test.salesforce.com/id/%@/%@", orgId, userId]];
+    NSError *error = nil;
+    [[SFUserAccountManager sharedInstance] saveAccountForUser:user error:&error];
+    XCTAssertNil(error);
+   
     return user;
 }
 
@@ -162,7 +167,7 @@
 - (void) testConvertSmartSqlWithJSON1
 {
     if ([[self.store attributesForSoup:kEmployeesSoup].features containsObject:kSoupFeatureExternalStorage]) {
-        [self log:SFLogLevelInfo msg:@"Test Skipped for soup with external storage feature."];
+        [SFSDKSmartStoreLogger i:[self class] format:@"Test Skipped for soup with external storage feature."];
         return;
     }
     XCTAssertEqualObjects(@"select TABLE_1_1, json_extract(soup, '$.education') from TABLE_1 where json_extract(soup, '$.education') = 'MIT'",
@@ -172,7 +177,7 @@
 - (void) testConvertSmartSqlWithJSON1AndTableQualifiedColumn
 {
     if ([[self.store attributesForSoup:kEmployeesSoup].features containsObject:kSoupFeatureExternalStorage]) {
-        [self log:SFLogLevelInfo msg:@"Test Skipped for soup with external storage feature."];
+        [SFSDKSmartStoreLogger i:[self class] format:@"Test Skipped for soup with external storage feature."];
         return;
     }
     XCTAssertEqualObjects(@"select json_extract(TABLE_1.soup, '$.education') from TABLE_1 order by json_extract(TABLE_1.soup, '$.education')",
@@ -182,7 +187,7 @@
 - (void) testConvertSmartSqlWithJSON1AndTableAliases
 {
     if ([[self.store attributesForSoup:kEmployeesSoup].features containsObject:kSoupFeatureExternalStorage]) {
-        [self log:SFLogLevelInfo msg:@"Test Skipped for soup with external storage feature."];
+        [SFSDKSmartStoreLogger i:[self class] format:@"Test Skipped for soup with external storage feature."];
         return;
     }
     XCTAssertEqualObjects(@"select json_extract(e.soup, '$.education'), json_extract(soup, '$.building') from TABLE_1 as e, TABLE_2",
@@ -275,6 +280,42 @@
     XCTAssertEqualObjects(christineJson[@"_soupLastModifiedDate"], result[0][2], @"Wrong soupLastModifiedDate");
 }
 
+- (void) testSmartQueryMatchingNullField
+{
+    NSDictionary* createdEmployee;
+    
+    // Employee with dept code
+    createdEmployee = [self createEmployeeWithJsonString:@"{\"employeeId\":\"001\",\"deptCode\":\"xyz\"}"];
+    XCTAssertEqualObjects(createdEmployee[@"deptCode"], @"xyz");
+    
+    // Employee with [NSNull null] dept code
+    createdEmployee = [self createEmployeeWithJsonString:@"{\"employeeId\":\"002\",\"deptCode\":null}"];
+    XCTAssertEqual(createdEmployee[@"deptCode"], [NSNull null]);
+    
+    // Employee with @"" dept code
+    createdEmployee = [self createEmployeeWithJsonString:@"{\"employeeId\":\"003\",\"deptCode\":\"\"}"];
+    XCTAssertEqualObjects(createdEmployee[@"deptCode"], @"");
+    
+    // Employee with no dept code
+    createdEmployee = [self createEmployeeWithJsonString:@"{\"employeeId\":\"004\"}"];
+    XCTAssertEqual(createdEmployee[@"deptCode"], nil);
+    
+    // Smart sql with is not null
+    SFQuerySpec* querySpec = [SFQuerySpec newSmartQuerySpec:@"select {employees:employeeId} from {employees} where {employees:deptCode} is not null order by {employees:employeeId}" withPageSize:4];
+    NSArray* result = [self.store queryWithQuerySpec:querySpec pageIndex:0  error:nil];
+    [self assertSameJSONArrayWithExpected:[SFJsonUtils objectFromJSONString:@"[[\"001\"],[\"003\"]]"] actual:result message:@"Wrong result"];
+
+    // Smart sql with is null
+    querySpec = [SFQuerySpec newSmartQuerySpec:@"select {employees:employeeId} from {employees} where {employees:deptCode} is null order by {employees:employeeId}" withPageSize:4];
+    result = [self.store queryWithQuerySpec:querySpec pageIndex:0  error:nil];
+    [self assertSameJSONArrayWithExpected:[SFJsonUtils objectFromJSONString:@"[[\"002\"],[\"004\"]]"] actual:result message:@"Wrong result"];
+    
+    // Smart sql looking for empty string
+    querySpec = [SFQuerySpec newSmartQuerySpec:@"select {employees:employeeId} from {employees} where {employees:deptCode} = \"\" order by {employees:employeeId}" withPageSize:4];
+    result = [self.store queryWithQuerySpec:querySpec pageIndex:0  error:nil];
+    [self assertSameJSONArrayWithExpected:[SFJsonUtils objectFromJSONString:@"[[\"003\"]]"] actual:result message:@"Wrong result"];
+}
+
 #pragma mark - helper methods
 - (void) loadData
 {
@@ -296,6 +337,11 @@
 {
     NSDictionary* employee = @{kFirstName: firstName, kLastName: lastName, kDeptCode: deptCode, kEmployeeId: employeeId, kManagerId: managerId, kSalary: @(salary)};
     [self.store upsertEntries:@[employee] toSoup:kEmployeesSoup];
+}
+
+- (NSDictionary*)createEmployeeWithJsonString:(NSString*)jsonString {
+    NSDictionary* employee = [SFJsonUtils objectFromJSONString:jsonString];
+    return [self.store upsertEntries:@[employee] toSoup:kEmployeesSoup][0];
 }
 	
 - (void) createDepartmentWithCode:(NSString*) deptCode withName:(NSString*)name withBudget:(NSUInteger) budget

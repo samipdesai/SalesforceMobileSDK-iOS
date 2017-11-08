@@ -25,7 +25,7 @@
 
 #import "SFHybridViewController.h"
 #import "SFHybridConnectionMonitor.h"
-#import "SFWKWebViewNavigationDelegate.h"
+#import <SalesforceSDKCore/SFSDKAppFeatureMarkers.h>
 #import <SalesforceSDKCore/SalesforceSDKManager.h>
 #import <SalesforceSDKCore/NSURL+SFStringUtils.h>
 #import <SalesforceSDKCore/NSURL+SFAdditions.h>
@@ -34,6 +34,9 @@
 #import <SalesforceSDKCore/SFAuthErrorHandlerList.h>
 #import <SalesforceSDKCore/SFSDKWebUtils.h>
 #import <SalesforceSDKCore/SFSDKResourceUtils.h>
+#import <SalesforceSDKCore/SFSDKEventBuilderHelper.h>
+#import <SalesforceSDKCore/NSString+SFAdditions.h>
+#import <SalesforceSDKCore/SFSDKWebViewStateManager.h>
 #import <Cordova/NSDictionary+CordovaPreferences.h>
 #import <Cordova/CDVUserAgentUtil.h>
 #import <objc/message.h>
@@ -59,18 +62,16 @@ static NSString * const kErrorContextAppLoading = @"AppLoading";
 static NSString * const kErrorContextAuthExpiredSessionRefresh = @"AuthRefreshExpiredSession";
 static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 
+// App feature constant.
+static NSString * const kSFAppFeatureUsesUIWebView = @"WV";
+
 @interface SFHybridViewController()
 {
     BOOL _foundHomeUrl;
     SFHybridViewConfig *_hybridViewConfig;
 }
 
-@property (nonatomic, readwrite, assign) BOOL useWKWebView;
-
-/**
- * Navigation web view delegate.
- */
-@property (nonatomic, strong, readwrite) SFWKWebViewNavigationDelegate *navWebViewDelegate;
+@property (nonatomic, readwrite, assign) BOOL useUIWebView;
 
 /**
  * Hidden WKWebView used to load the VF ping page.
@@ -162,21 +163,24 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 
 @implementation SFHybridViewController
 
-- (id)init
+- (id) init
 {
     return [self initWithConfig:nil];
 }
 
-- (id)initWithConfig:(SFHybridViewConfig *)viewConfig
+- (id) initWithConfig:(SFHybridViewConfig *) viewConfig
 {
-    return [self initWithConfig:viewConfig useWKWebView:NO];
+    return [self initWithConfig:viewConfig useUIWebView:NO];
 }
 
-- (id)initWithConfig:(SFHybridViewConfig *)viewConfig useWKWebView:(BOOL) useWKWebView
+- (id) initWithConfig:(SFHybridViewConfig *) viewConfig useUIWebView:(BOOL) useUIWebView
 {
     self = [super init];
     if (self) {
-        self.useWKWebView = useWKWebView;
+        self.useUIWebView = useUIWebView;
+        if (useUIWebView) {
+            [SFSDKAppFeatureMarkers registerAppFeature:kSFAppFeatureUsesUIWebView];
+        }
         _hybridViewConfig = (viewConfig == nil ? [SFHybridViewConfig fromDefaultConfigFile] : viewConfig);
         NSAssert(_hybridViewConfig != nil, @"_hybridViewConfig was not properly initialized. See output log for errors.");
         self.startPage = _hybridViewConfig.startPage;
@@ -186,21 +190,13 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 
 - (UIView *)newCordovaViewWithFrame:(CGRect)bounds
 {
-    if (self.useWKWebView) {
-        return [self newCordovaViewWithFrameAndEngine:bounds webViewEngine:@"SFWKWebViewEngine"];
-    } else {
-        return [self newCordovaViewWithFrameAndEngine:bounds webViewEngine:@"CDVUIWebViewEngine"];
-    }
+    return [self newCordovaViewWithFrameAndEngine:bounds webViewEngine:self.useUIWebView ? @"CDVUIWebViewEngine" : @"CDVWKWebViewEngine"];
 }
 
 - (UIView *)newCordovaViewWithFrameAndEngine:(CGRect)bounds webViewEngine:(NSString *)webViewEngine
 {
     [self.settings setCordovaSetting:webViewEngine forKey:@"CordovaWebViewEngine"];
-    UIView *view = [super newCordovaViewWithFrame:bounds];
-    if (self.useWKWebView) {
-        self.navWebViewDelegate = [[SFWKWebViewNavigationDelegate alloc] initWithEnginePlugin:self.webViewEngine];
-    }
-    return view;
+    return [super newCordovaViewWithFrame:bounds];
 }
 
 - (void)dealloc
@@ -291,29 +287,47 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 
 - (void)authenticateWithCompletionBlock:(SFOAuthPluginAuthSuccessBlock)completionBlock failureBlock:(SFOAuthFlowFailureCallbackBlock)failureBlock
 {
-
     /*
      * Reconfigure user agent. Basically this ensures that Cordova whitelisting won't apply to the
      * WKWebView that hosts the login screen (important for SSO outside of Salesforce domains).
      */
     [SFSDKWebUtils configureUserAgent:[self sfHybridViewUserAgentString]];
-    [[SFAuthenticationManager sharedManager] loginWithCompletion:^(SFOAuthInfo *authInfo) {
-        [self authenticationCompletion:nil authInfo:authInfo];
+    __weak __typeof(self) weakSelf = self;
+    SFOAuthFlowSuccessCallbackBlock authCompletionBlock = ^(SFOAuthInfo *authInfo, SFUserAccount *userAccount) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        [SFUserAccountManager sharedInstance].currentUser = userAccount;
+        [strongSelf authenticationCompletion:nil authInfo:authInfo];
         if (authInfo.authType == SFOAuthTypeRefresh) {
-            [self loadVFPingPage];
+            [strongSelf loadVFPingPage];
         }
         if (completionBlock != NULL) {
             NSDictionary *authDict = [self credentialsAsDictionary];
             completionBlock(authInfo, authDict);
         }
-    } failure:^(SFOAuthInfo *authInfo, NSError *error) {
-        if ([self logoutOnInvalidCredentials:error]) {
-            [self log:SFLogLevelError msg:@"OAuth plugin authentication request failed. Logging out."];
+    };
+
+    SFOAuthFlowFailureCallbackBlock authFailureBlock = ^(SFOAuthInfo *authInfo, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if ([strongSelf logoutOnInvalidCredentials:error]) {
+            [SFSDKHybridLogger d:[strongSelf class] format:[NSString stringWithFormat:@"OAuth plugin authentication request failed. Logging out."]];
+            NSMutableDictionary *attributes = [[NSMutableDictionary alloc] init];
+            attributes[@"errorCode"] = [NSNumber numberWithInteger:error.code];
+            attributes[@"errorDescription"] = error.localizedDescription;
+            [SFSDKEventBuilderHelper createAndStoreEvent:@"userLogout" userAccount:nil className:NSStringFromClass([self class]) attributes:attributes];
             [[SFAuthenticationManager sharedManager] logout];
         } else if (failureBlock != NULL) {
             failureBlock(authInfo, error);
         }
-    }];
+    };
+
+    if (![SFUserAccountManager sharedInstance].currentUser) {
+        [[SFAuthenticationManager sharedManager] loginWithCompletion:authCompletionBlock
+                                                             failure:authFailureBlock];
+    } else {
+        [[SFAuthenticationManager sharedManager] refreshCredentials:[SFUserAccountManager sharedInstance].currentUser.credentials
+                                                         completion:authCompletionBlock
+                                                            failure:authFailureBlock];
+    }
 }
 
 - (void)getAuthCredentialsWithCompletionBlock:(SFOAuthPluginAuthSuccessBlock)completionBlock failureBlock:(SFOAuthFlowFailureCallbackBlock)failureBlock
@@ -334,33 +348,35 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 {
     NSString *errorPage = _hybridViewConfig.errorPage;
     NSURL *errorPageUrl = [self fullFileUrlForPage:errorPage];
-    if (self.useWKWebView) {
-        self.errorPageWKWebView = [[WKWebView alloc] initWithFrame:self.view.frame];
-        self.errorPageWKWebView.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
-        self.errorPageWKWebView.navigationDelegate = self;
-        [self.view addSubview:self.errorPageWKWebView];
-    } else {
+    if (self.useUIWebView) {
         self.errorPageUIWebView = [[UIWebView alloc] initWithFrame:self.view.frame];
         self.errorPageUIWebView.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
         self.errorPageUIWebView.delegate = self;
         [self.view addSubview:self.errorPageUIWebView];
+    } else {
+        WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+        config.processPool = SFSDKWebViewStateManager.sharedProcessPool;
+        self.errorPageWKWebView = [[WKWebView alloc] initWithFrame:self.view.frame configuration:config];
+        self.errorPageWKWebView.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
+        self.errorPageWKWebView.navigationDelegate = self;
+        [self.view addSubview:self.errorPageWKWebView];
     }
     if (errorPageUrl != nil) {
         NSURL *errorPageUrlWithError = [self createErrorPageUrl:errorPageUrl code:errorCode description:errorDescription context:errorContext];
         NSURLRequest *errorRequest = [NSURLRequest requestWithURL:errorPageUrlWithError];
-        if (self.useWKWebView) {
-            [self.errorPageWKWebView loadRequest:errorRequest];
-        } else {
+        if (self.useUIWebView) {
             [self.errorPageUIWebView loadRequest:errorRequest];
+        } else {
+            [self.errorPageWKWebView loadRequest:errorRequest];
         }
     } else {
 
         // Error page does not exist. Generate a generic page with the error.
         NSString *errorContent = [self createDefaultErrorPageContentWithCode:errorCode description:errorDescription context:errorContext];
-        if (self.useWKWebView) {
-            [self.errorPageWKWebView loadHTMLString:errorContent baseURL:nil];
-        } else {
+        if (self.useUIWebView) {
             [self.errorPageUIWebView loadHTMLString:errorContent baseURL:nil];
+        } else {
+            [self.errorPageWKWebView loadHTMLString:errorContent baseURL:nil];
         }
     }
 }
@@ -409,7 +425,7 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
      * other cases, because of differences between instance URL and community URL.
      */
     if (createAbsUrl && ![returnUrl hasPrefix:@"http"]) {
-        fullReturnUrl = [NSString stringWithFormat:@"%@%@", instUrl, returnUrl];
+        fullReturnUrl = [NSString stringWithFormat:@"%@/%@", instUrl, returnUrl];
     }
     if([returnUrl containsString:@"frontdoor.jsp"]) {
         NSRange r1 = [returnUrl rangeOfString: isEncoded ? @"retURL%3D" : @"retURL="];
@@ -417,15 +433,15 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
         NSRange range = NSMakeRange(r1.location + r1.length, r2.location - r1.location - r1.length);
         NSString *newReturnUrl = [returnUrl substringWithRange: range];
         if(isEncoded) newReturnUrl = [newReturnUrl stringByRemovingPercentEncoding];
-        [self log:SFLogLevelDebug format:@"%@", newReturnUrl];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"%@", newReturnUrl]];
         return [self frontDoorUrlWithReturnUrl: newReturnUrl returnUrlIsEncoded:TRUE createAbsUrl: FALSE];
     }
-    NSString *encodedUrl = (isEncoded ? fullReturnUrl : [fullReturnUrl stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]);
+    NSString *encodedUrl = (isEncoded ? fullReturnUrl : [fullReturnUrl stringByURLEncoding]);
     NSMutableString *frontDoorUrl = [NSMutableString stringWithString:instUrl];
     if (![frontDoorUrl hasSuffix:@"/"]) {
         [frontDoorUrl appendString:@"/"];
     }
-    NSString *encodedSidValue = [creds.accessToken stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+    NSString *encodedSidValue = [creds.accessToken stringByURLEncoding];
     [frontDoorUrl appendFormat:@"secur/frontdoor.jsp?sid=%@&retURL=%@&display=touch", encodedSidValue, encodedUrl];
     return [NSURL URLWithString:frontDoorUrl];
 }
@@ -477,12 +493,8 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
     NSMutableString *errorPageUrlString = [NSMutableString stringWithString:[rootUrl absoluteString]];
     [rootUrl query] == nil ? [errorPageUrlString appendString:@"?"] : [errorPageUrlString appendString:@"&"];
     [errorPageUrlString appendFormat:@"%@=%ld", kErrorCodeParameterName, (long)errorCode];
-    [errorPageUrlString appendFormat:@"&%@=%@",
-     kErrorDescriptionParameterName,
-     [errorDescription stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
-    [errorPageUrlString appendFormat:@"&%@=%@",
-     kErrorContextParameterName,
-     [errorContext stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+    [errorPageUrlString appendFormat:@"&%@=%@", kErrorDescriptionParameterName, [errorDescription stringByURLEncoding]];
+    [errorPageUrlString appendFormat:@"&%@=%@", kErrorContextParameterName, [errorContext stringByURLEncoding]];
     return [NSURL URLWithString:errorPageUrlString];
 }
 
@@ -514,9 +526,7 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 
 - (void) webView:(WKWebView *) webView didStartProvisionalNavigation:(WKNavigation *) navigation
 {
-    if (self.navWebViewDelegate) {
-        [self.navWebViewDelegate webView:webView didStartProvisionalNavigation:navigation];
-    }
+    [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginResetNotification object:webView]];
 }
 
 - (void) webViewDidStartLoad:(UIWebView *) webView
@@ -527,23 +537,14 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 
 - (void) webView:(WKWebView *) webView decidePolicyForNavigationAction:(WKNavigationAction *) navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy)) decisionHandler
 {
-    [self log:SFLogLevelDebug format:@"webView:decidePolicyForNavigationAction:decisionHandler: Loading URL '%@'",
-     [navigationAction.request.URL redactedAbsoluteString:@[@"sid"]]];
-
-    // Hidden ping page load.
-    if ([webView isEqual:self.vfPingPageHiddenWKWebView]) {
-        [self log:SFLogLevelDebug msg:@"Setting up VF web state after plugin-based refresh."];
-        decisionHandler(WKNavigationActionPolicyAllow);
-    }
-
-    // Local error page load.
-    if ([webView isEqual:self.errorPageWKWebView]) {
-        [self log:SFLogLevelDebug format:@"Local error page ('%@') is loading.", navigationAction.request.URL.absoluteString];
-        decisionHandler(WKNavigationActionPolicyAllow);
-    }
-
-    // Cordova web view load.
-    if ([webView isEqual:self.webView]) {
+    [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"webView:decidePolicyForNavigationAction:decisionHandler: Loading URL '%@'",
+             [navigationAction.request.URL redactedAbsoluteString:@[@"sid"]]]];
+    BOOL shouldAllowRequest = YES;
+    if ([webView isEqual:self.vfPingPageHiddenWKWebView]) { // Hidden ping page load.
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"Setting up VF web state after plugin-based refresh."]];
+    } else if ([webView isEqual:self.errorPageWKWebView]) { // Local error page load.
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"Local error page ('%@') is loading.", navigationAction.request.URL.absoluteString]];
+    } else if ([webView isEqual:self.webView]) { // Cordova web view load.
 
         /*
          * If the request is attempting to refresh an invalid session, take over
@@ -551,21 +552,26 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
          */
         NSString *refreshUrl = [self isLoginRedirectUrl:navigationAction.request.URL];
         if (refreshUrl != nil) {
-            [self log:SFLogLevelWarning msg:@"Caught login redirect from session timeout. Reauthenticating."];
-
+            [SFSDKHybridLogger w:[self class] format:[NSString stringWithFormat:@"Caught login redirect from session timeout. Reauthenticating."]];
+            
             /*
              * Reconfigure user agent. Basically this ensures that Cordova whitelisting won't apply to the
              * WKWebView that hosts the login screen (important for SSO outside of Salesforce domains).
              */
             [SFSDKWebUtils configureUserAgent:[self sfHybridViewUserAgentString]];
             [[SFAuthenticationManager sharedManager]
-             loginWithCompletion:^(SFOAuthInfo *authInfo) {
-                 
+             refreshCredentials:[SFUserAccountManager sharedInstance].currentUser.credentials
+             completion:^(SFOAuthInfo *authInfo, SFUserAccount *userAccount) {
+                 [SFUserAccountManager sharedInstance].currentUser = userAccount;
                  // Reset the user agent back to Cordova.
                  [self authenticationCompletion:refreshUrl authInfo:authInfo];
              } failure:^(SFOAuthInfo *authInfo, NSError *error) {
                  if ([self logoutOnInvalidCredentials:error]) {
-                     [self log:SFLogLevelError msg:@"Could not refresh expired session.  Logging out."];
+                     [SFSDKHybridLogger e:[self class] format:[NSString stringWithFormat:@"Could not refresh expired session. Logging out."]];
+                     NSMutableDictionary *attributes = [[NSMutableDictionary alloc] init];
+                     attributes[@"errorCode"] = [NSNumber numberWithInteger:error.code];
+                     attributes[@"errorDescription"] = error.localizedDescription;
+                     [SFSDKEventBuilderHelper createAndStoreEvent:@"userLogout" userAccount:nil className:NSStringFromClass([self class]) attributes:attributes];
                      [[SFAuthenticationManager sharedManager] logout];
                  } else {
                      
@@ -573,29 +579,56 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
                      [self loadErrorPageWithCode:error.code description:error.localizedDescription context:kErrorContextAuthExpiredSessionRefresh];
                  }
              }];
-            decisionHandler(WKNavigationActionPolicyCancel);
-        }
-        if (self.navWebViewDelegate) {
-            [self.navWebViewDelegate webView:webView decidePolicyForNavigationAction:navigationAction decisionHandler:decisionHandler];
+            shouldAllowRequest = NO;
+        } else {
+            [self defaultWKNavigationHandling:webView decidePolicyForNavigationAction:navigationAction decisionHandler:decisionHandler];
+            return;
         }
     }
-    decisionHandler(WKNavigationActionPolicyAllow);
+    if (shouldAllowRequest) {
+        decisionHandler(WKNavigationActionPolicyAllow);
+    } else {
+        decisionHandler(WKNavigationActionPolicyCancel);
+    }
+}
+
+- (void) defaultWKNavigationHandling:(WKWebView *) webView decidePolicyForNavigationAction:(WKNavigationAction *) navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy)) decisionHandler {
+    NSURL *url = [navigationAction.request URL];
+
+    /*
+     * Execute any commands queued with cordova.exec() on the JS side.
+     * The part of the URL after gap:// is irrelevant.
+     */
+    if ([[url scheme] isEqualToString:@"gap"]) {
+        [self.commandQueue fetchCommandsFromJs];
+        
+        /*
+         * The delegate is called asynchronously in this case, so we don't have to use
+         * flushCommandQueueWithDelayedJs (setTimeout(0)) as we do with hash changes.
+         */
+        [self.commandQueue executePending];
+        decisionHandler(WKNavigationActionPolicyCancel);
+        return;
+    } else {
+        [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginHandleOpenURLNotification object:url]];
+        decisionHandler(WKNavigationActionPolicyAllow);
+        return;
+    }
 }
 
 - (BOOL) webView:(UIWebView *) webView shouldStartLoadWithRequest:(NSURLRequest *) request navigationType:(UIWebViewNavigationType) navigationType
 {
-    [self log:SFLogLevelDebug format:@"webView:shouldStartLoadWithRequest:navigationType: Loading URL '%@'",
-     [webView.request.URL redactedAbsoluteString:@[@"sid"]]];
+    [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"webView:shouldStartLoadWithRequest:navigationType: Loading URL '%@'", [webView.request.URL redactedAbsoluteString:@[@"sid"]]]];
 
     // Hidden ping page load.
     if ([webView isEqual:self.vfPingPageHiddenUIWebView]) {
-        [self log:SFLogLevelDebug msg:@"Setting up VF web state after plugin-based refresh."];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"Setting up VF web state after plugin-based refresh."]];
         return YES;
     }
 
     // Local error page load.
     if ([webView isEqual:self.errorPageUIWebView]) {
-        [self log:SFLogLevelDebug format:@"Local error page ('%@') is loading.", webView.request.URL.absoluteString];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"Local error page ('%@') is loading.", webView.request.URL.absoluteString]];
         return YES;
     }
 
@@ -608,24 +641,30 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
          */
         NSString *refreshUrl = [self isLoginRedirectUrl:webView.request.URL];
         if (refreshUrl != nil) {
-            [self log:SFLogLevelWarning msg:@"Caught login redirect from session timeout. Reauthenticating."];
-
+            [SFSDKHybridLogger w:[self class] format:[NSString stringWithFormat:@"Caught login redirect from session timeout. Reauthenticating."]];
+            
             /*
              * Reconfigure user agent. Basically this ensures that Cordova whitelisting won't apply to the
-             * WKWebView that hosts the login screen (important for SSO outside of Salesforce domains).
+             * UIWebView that hosts the login screen (important for SSO outside of Salesforce domains).
              */
             [SFSDKWebUtils configureUserAgent:[self sfHybridViewUserAgentString]];
             [[SFAuthenticationManager sharedManager]
-             loginWithCompletion:^(SFOAuthInfo *authInfo) {
+             refreshCredentials:[SFUserAccountManager sharedInstance].currentUser.credentials
+             completion:^(SFOAuthInfo *authInfo, SFUserAccount *userAccount) {
+                 [SFUserAccountManager sharedInstance].currentUser = userAccount;
 
                  // Reset the user agent back to Cordova.
                  [self authenticationCompletion:refreshUrl authInfo:authInfo];
              } failure:^(SFOAuthInfo *authInfo, NSError *error) {
                  if ([self logoutOnInvalidCredentials:error]) {
-                     [self log:SFLogLevelError msg:@"Could not refresh expired session. Logging out."];
+                    [SFSDKHybridLogger e:[self class] format:[NSString stringWithFormat:@"Could not refresh expired session. Logging out."]];
+                     NSMutableDictionary *attributes = [[NSMutableDictionary alloc] init];
+                     attributes[@"errorCode"] = [NSNumber numberWithInteger:error.code];
+                     attributes[@"errorDescription"] = error.localizedDescription;
+                     [SFSDKEventBuilderHelper createAndStoreEvent:@"userLogout" userAccount:nil className:NSStringFromClass([self class]) attributes:attributes];
                      [[SFAuthenticationManager sharedManager] logout];
                  } else {
-
+                     
                      // Error is not invalid credentials, or developer otherwise wants to handle it.
                      [self loadErrorPageWithCode:error.code description:error.localizedDescription context:kErrorContextAuthExpiredSessionRefresh];
                  }
@@ -633,7 +672,7 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
             return NO;
         }
         NSURL* url = [request URL];
-        
+
         /*
          * Execute any commands queued with cordova.exec() on the JS side.
          * The part of the URL after gap:// is irrelevant.
@@ -686,16 +725,16 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 - (void) finishLoadActions:(UIView *) webView navigation:(WKNavigation *) navigation
 {
     NSURL *requestUrl = nil;
-    if (self.useWKWebView) {
-        requestUrl = ((WKWebView *) webView).URL;
-    } else {
+    if (self.useUIWebView) {
         requestUrl = ((UIWebView *) webView).request.URL;
+    } else {
+        requestUrl = ((WKWebView *) webView).URL;
     }
     NSArray *redactParams = @[@"sid"];
     NSString *redactedUrl = [requestUrl redactedAbsoluteString:redactParams];
-    [self log:SFLogLevelDebug format:@"finishLoadActions: Loaded %@", redactedUrl];
+    [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"finishLoadActions: Loaded %@", redactedUrl]];
     if ([webView isEqual:self.vfPingPageHiddenUIWebView]) {
-        [self log:SFLogLevelDebug format:@"Finished loading VF ping page '%@'.", redactedUrl];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"Finished loading VF ping page '%@'.", redactedUrl]];
         return;
     }
     if ([webView isEqual:self.webView]) {
@@ -706,21 +745,15 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
          * be loaded directly in the event that the app is offline.
          */
         if (_foundHomeUrl == NO) {
-            [self log:SFLogLevelInfo format:@"Checking %@ as a 'home page' URL candidate for this app.", redactedUrl];
+            [SFSDKHybridLogger i:[self class] format:[NSString stringWithFormat:@"Checking %@ as a 'home page' URL candidate for this app.", redactedUrl]];
             if (![self isReservedUrlValue:requestUrl]) {
-                [self log:SFLogLevelInfo format:@"Setting %@ as the 'home page' URL for this app.", redactedUrl];
+                [SFSDKHybridLogger i:[self class] format:[NSString stringWithFormat:@"Setting %@ as the 'home page' URL for this app.", redactedUrl]];
                 self.appHomeUrl = requestUrl;
                 _foundHomeUrl = YES;
             }
         }
-        if (self.useWKWebView) {
-            if (self.navWebViewDelegate) {
-                [self.navWebViewDelegate webView:(WKWebView *) webView didFinishNavigation:navigation];
-            }
-        } else {
-            [CDVUserAgentUtil releaseLock:self.userAgentLockToken];
-            [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPageDidLoadNotification object:self.webView]];
-        }
+        [CDVUserAgentUtil releaseLock:self.userAgentLockToken];
+        [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPageDidLoadNotification object:self.webView]];
     }
 }
 
@@ -740,7 +773,7 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 
 - (void) loadErrorPageWithError:(NSError *) error
 {
-    [self log:SFLogLevelError format:@"Error while attempting to load web page: %@", error];
+    [SFSDKHybridLogger e:[self class] format:[NSString stringWithFormat:@"Error while attempting to load web page: %@", error]];
     if ([[self class] isFatalWebViewError:error]) {
         [self loadErrorPageWithCode:[error code] description:[error localizedDescription] context:kErrorContextAppLoading];
     }
@@ -776,23 +809,22 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
 
 - (void)authenticationCompletion:(NSString *)originalUrl authInfo:(SFOAuthInfo *)authInfo
 {
-    [self log:SFLogLevelDebug msg:@"authenticationCompletion:authInfo: - Initiating post-auth configuration."];
+    [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"authenticationCompletion:authInfo: - Initiating post-auth configuration."]];
     [SFAuthenticationManager resetSessionCookie];
 
     // If there's an original URL, load it through frontdoor.
     if (originalUrl != nil) {
-        [self log:SFLogLevelDebug format:@"Authentication complete. Redirecting to '%@' through frontdoor.",
-                [originalUrl stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"Authentication complete. Redirecting to '%@' through frontdoor.", [originalUrl stringByURLEncoding]]];
         BOOL createAbsUrl = YES;
         if (authInfo.authType == SFOAuthTypeRefresh) {
             createAbsUrl = NO;
         }
         NSURL *returnUrlAfterAuth = [self frontDoorUrlWithReturnUrl:originalUrl returnUrlIsEncoded:YES createAbsUrl:createAbsUrl];
         NSURLRequest *newRequest = [NSURLRequest requestWithURL:returnUrlAfterAuth];
-        if (self.useWKWebView) {
-            [(WKWebView *)(self.webView) loadRequest:newRequest];
-        } else {
+        if (self.useUIWebView) {
             [(UIWebView *)(self.webView) loadRequest:newRequest];
+        } else {
+            [(WKWebView *)(self.webView) loadRequest:newRequest];
         }
     }
 }
@@ -802,18 +834,20 @@ static NSString * const kVFPingPageUrl = @"/apexpages/utils/ping.apexp";
     SFOAuthCredentials *creds = [SFAuthenticationManager sharedManager].coordinator.credentials;
     if (nil != creds.apiUrl) {
         NSMutableString *instanceUrl = [[NSMutableString alloc] initWithString:creds.apiUrl.absoluteString];
-        NSString *encodedPingUrlParam = [kVFPingPageUrl stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+        NSString *encodedPingUrlParam = [kVFPingPageUrl stringByURLEncoding];
         [instanceUrl appendFormat:@"/visualforce/session?url=%@&autoPrefixVFDomain=true", encodedPingUrlParam];
         NSURL *pingURL = [[NSURL alloc] initWithString:instanceUrl];
         NSURLRequest *pingRequest = [[NSURLRequest alloc] initWithURL:pingURL];
-        if (self.useWKWebView) {
-            self.vfPingPageHiddenWKWebView = [[WKWebView alloc] initWithFrame:CGRectZero];
-            self.vfPingPageHiddenWKWebView.navigationDelegate = self;
-            [self.vfPingPageHiddenWKWebView loadRequest:pingRequest];
-        } else {
+        if (self.useUIWebView) {
             self.vfPingPageHiddenUIWebView = [[UIWebView alloc] initWithFrame:CGRectZero];
             self.vfPingPageHiddenUIWebView.delegate = self;
             [self.vfPingPageHiddenUIWebView loadRequest:pingRequest];
+        } else {
+            WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+            config.processPool = SFSDKWebViewStateManager.sharedProcessPool;
+            self.vfPingPageHiddenWKWebView = [[WKWebView alloc] initWithFrame:CGRectZero configuration:config];
+            self.vfPingPageHiddenWKWebView.navigationDelegate = self;
+            [self.vfPingPageHiddenWKWebView loadRequest:pingRequest];
         }
     }
 }

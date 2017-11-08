@@ -3,7 +3,7 @@
  SalesforceSDKCore
  
  Created by Kunal Chitalia on 1/22/16.
- Copyright (c) 2016, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2016-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -32,9 +32,12 @@
 #import "SFSDKLoginHostListViewController.h"
 #import "SFSDKLoginHostDelegate.h"
 #import "UIColor+SFColors.h"
+#import "SFSDKResourceUtils.h"
+#import "SFUserAccountManager.h"
+#import "SFAuthenticationManager.h"
 
 
-@interface SFLoginViewController () <SFSDKLoginHostDelegate, SFUserAccountManagerDelegate, SFAuthenticationManagerDelegate>
+@interface SFLoginViewController () <SFSDKLoginHostDelegate, SFUserAccountManagerDelegate>
 
 @property (nonatomic, strong) UINavigationBar *navBar;
 
@@ -142,15 +145,7 @@
 
 - (BOOL)shouldShowBackButton {
     NSInteger totalAccounts = [SFUserAccountManager sharedInstance].allUserAccounts.count;
-    if (totalAccounts > 0) {
-        if (totalAccounts == 1) {
-            SFUserAccount *userAccount = [SFUserAccountManager sharedInstance].allUserAccounts.firstObject;
-            return !(userAccount.isTemporaryUser);
-        } else {
-            return YES;
-        }
-    }
-    return NO;
+    return  (totalAccounts > 0);
 }
 
 #pragma mark - Action Methods
@@ -244,6 +239,12 @@
     [self hideHostListView:YES];
 }
 
+- (void)hostListViewController:(SFSDKLoginHostListViewController *)hostListViewController didChangeLoginHost:(SFSDKLoginHost *)newLoginHost {
+    if ([self.delegate respondsToSelector:@selector(loginViewController:didChangeLoginHost:)]) {
+        [self.delegate loginViewController:self didChangeLoginHost:newLoginHost];
+    }
+}
+
 #pragma mark - Login Host
 
 - (void)showHostListView {
@@ -256,14 +257,12 @@
     [self dismissViewControllerAnimated:animated completion:nil];
 }
 
-#pragma mark - SF Authentication Manager
+#pragma mark - SFUserAccountManagerDelegate
 
 - (void)userAccountManager:(SFUserAccountManager *)userAccountManager
         willSwitchFromUser:(SFUserAccount *)fromUser
                     toUser:(SFUserAccount *)toUser {
-    if (!fromUser.isTemporaryUser) {
         self.previousUserAccount = fromUser;
-    }
 }
 
 - ( UIImage * _Nonnull )headerBackgroundImage {

@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -28,6 +28,7 @@ NSString * const kEmptyString = @"";
 NSString * const kNullString = @"null";
 
 NSString * const kId = @"Id";
+NSString * const kCreatedId = @"id"; // id in sobject create response
 NSString * const kName = @"Name";
 NSString * const kType = @"Type";
 NSString * const kAttributes = @"attributes";
@@ -36,9 +37,14 @@ NSString * const kRawData = @"rawData";
 NSString * const kObjectTypeField = @"attributes.type";
 NSString * const kLastModifiedDate = @"LastModifiedDate";
 NSString * const kResponseRecords = @"records";
+NSString * const kResponseSearchRecords = @"searchRecords";
 NSString * const kResponseTotalSize = @"totalSize";
 NSString * const kResponseNextRecordsUrl = @"nextRecordsUrl";
 NSString * const kRecentItems = @"recentItems";
+NSString * const kCompositeResponse = @"compositeResponse";
+NSString * const kHttpStatusCode = @"httpStatusCode";
+NSString * const kReferenceId = @"referenceId";
+NSString * const kBody = @"body";
 
 NSString * const kAccount = @"Account";
 NSString * const kLead = @"Lead";

@@ -3,7 +3,7 @@
 
 #define SALESFORCE_SDK_IS_PRODUCTION_VERSION YES
 
-#define SALESFORCE_SDK_BUILD_IDENTIFIER @".unstable"
+#define SALESFORCE_SDK_BUILD_IDENTIFIER @".dev"
 
 #define __SALESFORCE_SDK_2_0_0 20000
 #define __SALESFORCE_SDK_2_0_1 20001
@@ -36,8 +36,13 @@
 #define __SALESFORCE_SDK_4_2_0 40200
 #define __SALESFORCE_SDK_4_3_0 40300
 #define __SALESFORCE_SDK_4_3_1 40301
+#define __SALESFORCE_SDK_5_0_0 50000
+#define __SALESFORCE_SDK_5_0_1 50001
+#define __SALESFORCE_SDK_5_1_0 50100
+#define __SALESFORCE_SDK_5_2_0 50200
+#define __SALESFORCE_SDK_5_3_0 53000
 
-#define SALESFORCE_SDK_VERSION_MIN_REQUIRED __SALESFORCE_SDK_4_3_1
+#define SALESFORCE_SDK_VERSION_MIN_REQUIRED __SALESFORCE_SDK_5_3_0
 
 #define SALESFORCE_SDK_VERSION [NSString stringWithFormat:@"%d.%d.%d%@",              \
                                 (SALESFORCE_SDK_VERSION_MIN_REQUIRED / 10000),        \
@@ -54,9 +59,9 @@ __builtin_unreachable(); \
 }
 
 #ifdef __clang__
-#define SFSDK_DEPRECATED(version, msg) __attribute__((deprecated("Deprecated in Salesforce Mobile SDK " #version ". " msg)))
+#define SFSDK_DEPRECATED(dep_version, rem_version, msg) __attribute__((deprecated("Deprecated in Salesforce Mobile SDK " #dep_version " and will be removed in Salesforce Mobile SDK " #rem_version ". " msg)))
 #else
-#define SFSDK_DEPRECATED(version, msg) __attribute__((deprecated()))
+#define SFSDK_DEPRECATED(dep_version, rem_version, msg) __attribute__((deprecated()))
 #endif
 
 #endif // SalesforceSDKConstants_h

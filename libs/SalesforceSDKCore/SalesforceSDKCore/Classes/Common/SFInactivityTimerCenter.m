@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -23,7 +23,7 @@
  */
 
 #import "SFInactivityTimerCenter.h"
-#import "SFLogger.h"
+#import <SalesforceAnalytics/NSUserDefaults+SFAdditions.h>
 
 @implementation SFInactivityTimerCenter
 
@@ -34,7 +34,7 @@ static NSDate *lastActivityTimestamp = nil;
 
 + (void)initialize {
     if (self == [SFInactivityTimerCenter class]) {
-        lastActivityTimestamp = [[NSUserDefaults standardUserDefaults] objectForKey:kDefaultKeyLastActivity];
+        lastActivityTimestamp = [[NSUserDefaults msdkUserDefaults] objectForKey:kDefaultKeyLastActivity];
         if(!lastActivityTimestamp) {
             lastActivityTimestamp = [[NSDate alloc] init];
         }
@@ -82,9 +82,9 @@ static NSDate *lastActivityTimestamp = nil;
         NSNumber *interval = [allIntervals objectForKey:timerName];
         if (t.valid) {
             [t setFireDate:[[NSDate date] dateByAddingTimeInterval:[interval doubleValue]]];
-            [self log:SFLogLevelDebug format:@"timer %@ updated to +%@ seconds", timerName, interval];
+            [SFSDKCoreLogger d:[self class] format:@"timer %@ updated to +%@ seconds", timerName, interval];
         } else {
-            [self log:SFLogLevelError format:@"timer %@ is invalid. removing...", timerName];
+            [SFSDKCoreLogger e:[self class] format:@"timer %@ is invalid. removing...", timerName];
             [keysToRemove addObject:timerName];
         }
     }
@@ -93,8 +93,8 @@ static NSDate *lastActivityTimestamp = nil;
 }
 
 + (void)saveActivityTimestamp {
-	[[NSUserDefaults standardUserDefaults] setObject:lastActivityTimestamp forKey:kDefaultKeyLastActivity];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+	[[NSUserDefaults msdkUserDefaults] setObject:lastActivityTimestamp forKey:kDefaultKeyLastActivity];
+    [[NSUserDefaults msdkUserDefaults] synchronize];
 }
 
 + (NSDate *)lastActivityTimestamp {

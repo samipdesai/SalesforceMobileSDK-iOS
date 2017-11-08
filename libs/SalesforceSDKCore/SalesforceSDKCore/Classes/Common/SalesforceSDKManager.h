@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -43,6 +43,11 @@ typedef NS_ENUM(NSUInteger, SFAppType) {
 
 NS_ASSUME_NONNULL_BEGIN
 
+// User agent constants
+static NSString * const kSFMobileSDKNativeDesignator = @"Native";
+static NSString * const kSFMobileSDKHybridDesignator = @"Hybrid";
+static NSString * const kSFMobileSDKReactNativeDesignator = @"ReactNative";
+
 /**
  Block typedef for presenting the snapshot view controller.
  */
@@ -56,7 +61,6 @@ typedef void (^SFSnapshotViewControllerDismissalBlock)(UIViewController* snapsho
 
 /** Delegate protocol for handling foregrounding and backgrounding in Mobile SDK apps.
  */
-
 @protocol SalesforceSDKManagerDelegate <NSObject>
 
 @optional
@@ -97,9 +101,30 @@ typedef void (^SFSnapshotViewControllerDismissalBlock)(UIViewController* snapsho
 + (void)setInstanceClass:(Class)className;
 
 /**
+ * Sets the app name to be used by the analytics framework.
+ *
+ * @param appName App name.
+ */
++ (void)setAiltnAppName:(nonnull NSString *)appName;
+
+/**
+ * Returns the app name being used by the analytics framework.
+ *
+ * @return App name.
+ */
++ (nonnull NSString *)ailtnAppName;
+
+/**
  @return The singleton instance of the SDK Manager.
  */
 + (nonnull instancetype)sharedManager;
+
+/**
+ * Returns a unique device ID.
+ *
+ * @return Device ID.
+ */
+- (NSString *) deviceId;
 
 /** The OAuth configuration parameters defined in the developer's Salesforce connected app.
  */
@@ -109,7 +134,6 @@ typedef void (^SFSnapshotViewControllerDismissalBlock)(UIViewController* snapsho
  Whether or not the SDK is currently in the middle of a launch process.
  */
 @property (nonatomic, readonly) BOOL isLaunching;
-
 
 /**
  App type (native, hybrid or react native)
@@ -131,6 +155,10 @@ typedef void (^SFSnapshotViewControllerDismissalBlock)(UIViewController* snapsho
  */
 @property (nonatomic, strong, nullable) NSArray<NSString*> *authScopes;
 
+/**
+ The Branded Login path configured for this application.
+ */
+@property (nonatomic, nullable, copy) NSString *brandLoginPath;
 /**
  Whether or not to attempt authentication as part of the launch process.  Default
  value is YES.
@@ -174,7 +202,7 @@ typedef void (^SFSnapshotViewControllerDismissalBlock)(UIViewController* snapsho
  This action is called when `useSnapshotView` is YES. If this action is not set or if nil is returned,
  a default opaque white view will be used.
  */
-@property (nonatomic, copy) SFSnapshotViewControllerCreationBlock snapshotViewControllerCreationAction;
+@property (nonatomic, copy, nullable) SFSnapshotViewControllerCreationBlock snapshotViewControllerCreationAction;
 
 /**
  The block to execute to present the snapshot viewcontroller.
@@ -182,14 +210,14 @@ typedef void (^SFSnapshotViewControllerDismissalBlock)(UIViewController* snapsho
  @discussion
  This block is only invoked if the dismissal action is also set.
  */
-@property (nonatomic, copy) SFSnapshotViewControllerPresentationBlock snapshotPresentationAction;
+@property (nonatomic, copy, nullable) SFSnapshotViewControllerPresentationBlock snapshotPresentationAction;
 
 /**
  The block to execute to dismiss the snapshot viewcontroller.
  @discussion
  This block is only invoked if the presentation action is also set.
  */
-@property (nonatomic, copy) SFSnapshotViewControllerDismissalBlock snapshotDismissalAction;
+@property (nonatomic, copy, nullable) SFSnapshotViewControllerDismissalBlock snapshotDismissalAction;
 
 /**
  The preferred passcode provider for the app.  Defaults to kSFPasscodeProviderPBKDF2.
@@ -233,11 +261,6 @@ typedef void (^SFSnapshotViewControllerDismissalBlock)(UIViewController* snapsho
  @return A log-friendly string of the launch actions that were taken, given in postLaunchAction.
  */
 + (NSString *)launchActionsStringRepresentation:(SFSDKLaunchAction)launchActions;
-
-/**
- @param account The account you would like loaded upon initialization.
- */
-+ (void)setDesiredAccount:(SFUserAccount*)account;
 
 @end
 

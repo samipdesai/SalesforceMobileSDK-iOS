@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/forcedotcom/SalesforceMobileSDK-iOS.svg?branch=unstable)](https://travis-ci.org/forcedotcom/SalesforceMobileSDK-iOS)
+[![Build Status](https://forcedotcom.github.io/SalesforceMobileSDK-TestResults/iOS-test-results/dev/latest/buildstatus.svg)](https://forcedotcom.github.io/SalesforceMobileSDK-TestResults/iOS-test-results/dev/latest/index.html)
 
 # Salesforce.com Mobile SDK for iOS
 
@@ -27,25 +27,28 @@ This script pulls the submodule dependencies from GitHub, to finalize setup of t
 
 See [build.md](build.md) for information on generating binary distributions and app templates.
 
-The Salesforce Mobile SDK for iOS requires iOS 8.0 or greater.  The install.sh script checks for this, and aborts if the configured SDK version is incorrect.  Building from the command line has been tested using ant 1.8.  Older versions might work, but we recommend using the latest version of ant.
+The Salesforce Mobile SDK for iOS requires iOS 9.0 or greater.  The install.sh script checks for this, and aborts if the configured SDK version is incorrect.  Building from the command line has been tested using ant 1.8.  Older versions might work, but we recommend using the latest version of ant.
 
 If you have problems building any of the projects, take a look at the online [FAQ](https://github.com/forcedotcom/SalesforceMobileSDK-iOS/wiki/FAQ) for troubleshooting tips.
 
 Introduction
 ==
 
-### What's New in 4.3
+### What's New in 5.3
 
-**SmartStore Enhancements**
-- To enhance performance in certain edge cases, SmartStore adds an option for serializing unusually large soup elements in external storage.
+**OS Version Support**
+- iOS 11.0 is fully supported in Mobile SDK 5.3.
 
 **Library Upgrades**
-- We've updated React Native to version 0.30.0.
-- We've updated Cordova to version 4.2.0.
+- We've updated SQLCipher to version 3.4.1.
 
 **Other Technical Improvements**
 - Improvements to sample apps.
 - Various bug fixes.
+
+**Deprecations**
+- CSFNetwork, CSFAction and all related network classes are now deprecated and will be removed in Mobile SDK 6.0. Instead, use SFRestAPI and SFNetwork.
+- SFLogger is now deprecated and will be removed in Mobile SDK 6.0. Instead, use SFSDKLogger.
 
 Check http://developer.force.com/mobilesdk for additional articles and tutorials.
 
@@ -67,14 +70,14 @@ To create hybrid apps that use the Salesforce REST API or access Visualforce pag
 Documentation
 ==
 
-* [Salesforce Mobile SDK Development Guide](https://github.com/forcedotcom/SalesforceMobileSDK-Shared/blob/master/doc/mobile_sdk.pdf?raw=true)
+* [SalesforceAnalytics Library Reference](http://forcedotcom.github.io/SalesforceMobileSDK-iOS/Documentation/SalesforceAnalytics/html/index.html)
 * [SalesforceSDKCore Library Reference](http://forcedotcom.github.io/SalesforceMobileSDK-iOS/Documentation/SalesforceSDKCore/html/index.html)
-* [SalesforceRestAPI Library Reference](http://forcedotcom.github.io/SalesforceMobileSDK-iOS/Documentation/SalesforceRestAPI/html/index.html)
-* [SalesforceNetwork Library Reference](http://forcedotcom.github.io/SalesforceMobileSDK-iOS/Documentation/SalesforceNetwork/html/index.html)
 * [SmartStore Library Reference](http://forcedotcom.github.io/SalesforceMobileSDK-iOS/Documentation/SmartStore/html/index.html)
 * [SmartSync Library Reference](http://forcedotcom.github.io/SalesforceMobileSDK-iOS/Documentation/SmartSync/html/index.html)
 * [SalesforceHybridSDK Library Reference](http://forcedotcom.github.io/SalesforceMobileSDK-iOS/Documentation/SalesforceHybridSDK/html/index.html)
 * [SalesforceReact Library Reference](http://forcedotcom.github.io/SalesforceMobileSDK-iOS/Documentation/SalesforceReact/html/index.html)
+* Salesforce Mobile SDK Development Guide -- [PDF](https://github.com/forcedotcom/SalesforceMobileSDK-Shared/blob/master/doc/mobile_sdk.pdf) | [HTML](https://developer.salesforce.com/docs/atlas.en-us.mobile_sdk.meta/mobile_sdk/preface_intro.htm)
+* [Mobile SDK Trail](https://trailhead.salesforce.com/trails/mobile_sdk_intro)
 
 Discussion
 ==

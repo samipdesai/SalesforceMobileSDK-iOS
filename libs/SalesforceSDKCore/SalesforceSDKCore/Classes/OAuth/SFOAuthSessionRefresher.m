@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -23,7 +23,7 @@
  */
 
 #import "SFOAuthSessionRefresher+Internal.h"
-#import "SFOAuthCredentials.h"
+#import "SFAuthenticationManager.h"
 
 @implementation SFOAuthSessionRefresher
 
@@ -32,6 +32,8 @@
     if (self) {
         self.coordinator = [[SFOAuthCoordinator alloc] initWithCredentials:credentials];
         self.coordinator.delegate = self;
+        self.coordinator.additionalTokenRefreshParams = [SFAuthenticationManager sharedManager].additionalTokenRefreshParams;
+        self.coordinator.additionalOAuthParameterKeys = [SFAuthenticationManager sharedManager].additionalOAuthParameterKeys;
     }
     return self;
 }
@@ -82,7 +84,7 @@
 #pragma mark - Private methods
 
 - (void)completeWithSuccess:(SFOAuthCredentials *)credentials {
-    [self log:SFLogLevelInfo format:@"%@ Session was successfully refreshed.", NSStringFromSelector(_cmd)];
+    [SFSDKCoreLogger i:[self class] format:@"%@ Session was successfully refreshed.", NSStringFromSelector(_cmd)];
     if (self.completionBlock) {
         dispatch_async(dispatch_get_main_queue(), ^{
             self.completionBlock(credentials);
@@ -91,7 +93,8 @@
 }
 
 - (void)completeWithError:(NSError *)error {
-    [self log:SFLogLevelError format:@"%@ Refresh failed with error: %@", NSStringFromSelector(_cmd), error];
+    [SFSDKCoreLogger e:[self class] format:@"%@ Refresh failed with error: %@", NSStringFromSelector(_cmd), error];
+
     if (self.errorBlock) {
         dispatch_async(dispatch_get_main_queue(), ^{
             self.errorBlock(error);
@@ -103,6 +106,12 @@
 
 - (void)oauthCoordinatorDidAuthenticate:(SFOAuthCoordinator *)coordinator authInfo:(SFOAuthInfo *)info {
     [self completeWithSuccess:coordinator.credentials];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter] postNotificationName:kSFAuthenticationManagerFinishedNotification
+                                                            object:nil
+                                                          userInfo:nil];
+    });
 }
 
 - (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didFailWithError:(NSError *)error authInfo:(SFOAuthInfo *)info {
@@ -111,12 +120,27 @@
 
 - (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didBeginAuthenticationWithView:(WKWebView *)view {
     // Shouldn't happen (refreshSessionWithCompletion:error: is guarded by the presence of a refresh token), but....
-    NSString *errorString = [NSString stringWithFormat:@"%@: User Agent flow not supported for token refresh.", NSStringFromClass([self class])];
+    [self finishForUnsupportedFlow:@"User Agent" coordinator:coordinator];
+}
+
+- (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didBeginAuthenticationWithSafariViewController:(SFSafariViewController *)svc {
+    // Shouldn't happen (refreshSessionWithCompletion:error: is guarded by the presence of a refresh token), but....
+    [self finishForUnsupportedFlow:@"Web Server" coordinator:coordinator];
+}
+
+- (void)oauthCoordinatorDidCancelBrowserAuthentication:(SFOAuthCoordinator *)coordinator {
+    // Shouldn't happen (refreshSessionWithCompletion:error: is guarded by the presence of a refresh token), but....
+    [self finishForUnsupportedFlow:@"Web Server" coordinator:coordinator];
+}
+
+- (void)finishForUnsupportedFlow:(NSString *)flow coordinator:(SFOAuthCoordinator *)coordinator {
+    NSString *errorString = [NSString stringWithFormat:@"%@: %@ flow not supported for token refresh.", NSStringFromClass([self class]), flow];
     NSError *error = [NSError errorWithDomain:kSFOAuthErrorDomain
                                          code:SFOAuthSessionRefreshErrorCodeInvalidCredentials
                                      userInfo:@{ NSLocalizedDescriptionKey: errorString }];
     [coordinator stopAuthentication];
     [self completeWithError:error];
 }
+
 
 @end

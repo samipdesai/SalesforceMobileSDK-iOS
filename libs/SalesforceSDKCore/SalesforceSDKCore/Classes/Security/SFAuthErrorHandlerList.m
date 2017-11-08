@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2013, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2013-present, salesforce.com, inc. All rights reserved.
  Author: Kevin Hawkins
  
  Redistribution and use of this software in source and binary forms, with or without modification,
@@ -69,7 +69,7 @@
 {
     SFAuthErrorHandler *existingHandler = [self retrieveAuthErrorHandlerWithName:errorHandler.name];
     if (existingHandler != nil) {
-        [self log:SFLogLevelWarning format:@"Existing auth error handler with name '%@' will be removed.", existingHandler.name];
+        [SFSDKCoreLogger w:[self class] format:@"Existing auth error handler with name '%@' will be removed.", existingHandler.name];
         [self removeAuthErrorHandler:existingHandler];
     }
     [self.authHandlerMutableArray insertObject:errorHandler atIndex:index];
@@ -79,7 +79,7 @@
 {
     SFAuthErrorHandler *existingHandler = [self retrieveAuthErrorHandlerWithName:errorHandlerName];
     if (existingHandler == nil) {
-        [self log:SFLogLevelWarning format:@"Auth error handler with name '%@' not found.  No action taken.", errorHandlerName];
+        [SFSDKCoreLogger w:[self class] format:@"Auth error handler with name '%@' not found.  No action taken.", errorHandlerName];
     } else {
         [self removeAuthErrorHandler:existingHandler];
     }

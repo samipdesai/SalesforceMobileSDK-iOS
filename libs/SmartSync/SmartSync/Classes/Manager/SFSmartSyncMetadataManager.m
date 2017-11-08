@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -25,8 +25,8 @@
 #import "SFSmartSyncMetadataManager.h"
 #import <SalesforceSDKCore/SFAuthenticationManager.h>
 #import <SalesforceSDKCore/SFUserAccount.h>
-#import <SalesforceRestAPI/SFRestAPI+Blocks.h>
-#import "SFSmartSyncSoqlBuilder.h"
+#import <SalesforceSDKCore/SFRestAPI+Blocks.h>
+#import <SalesforceSDKCore/SFSDKSoqlBuilder.h>
 #import "SFSmartSyncConstants.h"
 #import "SFObjectType+Internal.h"
 #import "SFObject+Internal.h"
@@ -34,7 +34,7 @@
 #import "SFSmartSyncPersistableObject+Internal.h"
 
 // Default API version.
-static NSString * kDefaultApiVersion = @"v36.0";
+static NSString * kDefaultApiVersion = @"v39.0";
 
 // Error constants.
 static NSInteger kSFNetworkRequestFailedDueToNoModification = 304;
@@ -186,7 +186,7 @@ static NSMutableDictionary *metadataMgrList = nil;
     }
     void(^invokeErrorBlock)(NSError *error) = ^(NSError *error) {
         if (error.code != kSFNetworkRequestFailedDueToNoModification) {
-            [self log:SFLogLevelError format:@"Failed to get recently access object types, %@", [error localizedDescription]];
+            [SFSDKSmartSyncLogger e:[self class] format:@"Failed to get recently access object types, %@", [error localizedDescription]];
         }
         if (error.code == kSFNetworkRequestFailedDueToNoModification) {
             if ([self shouldCallCompletionBlock:completionBlock completionBlockInvoked:completionBlockInvoked cachePolicy:cachePolicy]) {
@@ -270,7 +270,7 @@ static NSMutableDictionary *metadataMgrList = nil;
             if ([SFRestRequest isNetworkError:error]) {
                 invokeErrorBlock(error);
             } else {
-                [self log:SFLogLevelError format:@"Unable to load smart scopes, %@", error];
+                [SFSDKSmartSyncLogger e:[self class] format:@"Unable to load smart scopes, %@", error];
                 processSmartScopes(nil, searchableObjects);
             }
         };
@@ -346,7 +346,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
     __block NSArray *recentItems = nil;
     void(^callErrorBlock)(NSError *error) = ^(NSError *error) {
         if (error.code != kSFNetworkRequestFailedDueToNoModification) {
-            [self log:SFLogLevelError format:@"Failed to get recently accessed objects by type [%@], %@", objectTypeName, [error localizedDescription]];
+            [SFSDKSmartSyncLogger e:[self class] format:@"Failed to get recently accessed objects by type [%@], %@", objectTypeName, [error localizedDescription]];
         }
         if (!completionBlockInvoked && error.code == kSFNetworkRequestFailedDueToNoModification) {
             completionBlock(cachedData, YES, needToReloadCache);
@@ -361,9 +361,9 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
     
     // Loads the MRU objects.
     void (^loadRecentsBlock)(SFObjectType *objectType) = ^(SFObjectType *objectType){
-        SFSmartSyncSoqlBuilder *queryBuilder = nil;
+        SFSDKSoqlBuilder *queryBuilder = nil;
         if (globalMRU) {
-            queryBuilder = [SFSmartSyncSoqlBuilder withFields:@"Id, Name, Type"];
+            queryBuilder = [SFSDKSoqlBuilder withFields:@"Id, Name, Type"];
             [queryBuilder from:kRecentlyViewed];
             NSString *whereClause = @"LastViewedDate != NULL";
             if (![SFSmartSyncObjectUtils isEmpty:self.communityId]) {
@@ -381,9 +381,9 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
             NSString *queryFields = nil;
             queryFields = [self returnFieldsForObjectType:objectType];
             if (![SFSmartSyncObjectUtils isEmpty:queryFields]) {
-                queryBuilder = [SFSmartSyncSoqlBuilder withFields:queryFields];
+                queryBuilder = [SFSDKSoqlBuilder withFields:queryFields];
             } else {
-                queryBuilder = [SFSmartSyncSoqlBuilder withFields:@"Id, Name, Type"];
+                queryBuilder = [SFSDKSoqlBuilder withFields:@"Id, Name, Type"];
             }
             NSString *whereClause = nil;
             if (objectContainedLastViewedDate) {
@@ -438,7 +438,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
             if (error.code == 400) {
                 
                 // 400 error could be due to cached search layout, so retry it at least once.
-                [self log:SFLogLevelError format:@"Load MRU failed with %@, retry with updated search layout ", [error localizedDescription]];
+                [SFSDKSmartSyncLogger e:[self class] format:@"Load MRU failed with %@, retry with updated search layout ", [error localizedDescription]];
                 [self removeObjectTypesLayout:@[objectType]];
                 [self loadMRUObjects:objectTypeName limit:limit cachePolicy:cachePolicy refreshCacheIfOlderThan:refreshCacheIfOlderThan networkFieldName:nil inRetry:NO completion:completionBlock error:errorBlock];
             } else {
@@ -529,7 +529,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
     
     SFRestFailBlock failBlock = ^(NSError *error) {
         if (error.code != kSFNetworkRequestFailedDueToNoModification) {
-            [self log:SFLogLevelError format:@"failed to get get all searchable objects, [%@]", [error localizedDescription]];
+            [SFSDKSmartSyncLogger e:[self class] format:@"failed to get get all searchable objects, [%@]", [error localizedDescription]];
         }
         if (error.code == kSFNetworkRequestFailedDueToNoModification) {
             if ([self shouldCallCompletionBlock:completionBlock completionBlockInvoked:completionBlockInvoked cachePolicy:cachePolicy]) {
@@ -558,7 +558,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
     }
     if (nil != errorMessage) {
         errorMessage = [NSString stringWithFormat:@"Unable to load objectTypeInfo, [%@]", errorMessage];
-        [self log:SFLogLevelError msg:errorMessage];
+        [SFSDKSmartSyncLogger e:[self class] format:errorMessage];
         if (errorBlock) {
             NSError *error = [self errorWithDescription:errorMessage];
             if (errorBlock) {
@@ -607,7 +607,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
     
     SFRestFailBlock failBlock = ^(NSError *error) {
         if (error.code != kSFNetworkRequestFailedDueToNoModification) {
-            [self log:SFLogLevelError format:@"Failed to get get object information for %@, [%@]", objectTypeName, [error localizedDescription]];
+            [SFSDKSmartSyncLogger e:[self class] format:@"Failed to get get object information for %@, [%@]", objectTypeName, [error localizedDescription]];
         }
         if (error.code == kSFNetworkRequestFailedDueToNoModification) {
             if ([self shouldCallCompletionBlock:completionBlock completionBlockInvoked:completionBlockInvoked cachePolicy:cachePolicy]) {
@@ -636,7 +636,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
     }
     if (nil != errorMessage) {
         errorMessage = [NSString stringWithFormat:@"Unable to load object layout, [%@]", errorMessage];
-        [self log:SFLogLevelError msg:errorMessage];
+        [SFSDKSmartSyncLogger e:[self class] format:errorMessage];
         if (errorBlock) {
             NSError *error = [self errorWithDescription:errorMessage];
             if (errorBlock) {
@@ -744,7 +744,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
     
     SFRestFailBlock failBlock = ^(NSError *error) {
         if (error.code != kSFNetworkRequestFailedDueToNoModification) {
-            [self log:SFLogLevelError format:@"failed to get get objects layout, [%@]", [error localizedDescription]];
+            [SFSDKSmartSyncLogger e:[self class] format:@"failed to get get objects layout, [%@]", [error localizedDescription]];
         }
         if (error.code == kSFNetworkRequestFailedDueToNoModification) {
             if ([self shouldCallCompletionBlock:completionBlock completionBlockInvoked:completionBlockInvoked cachePolicy:cachePolicy]) {
@@ -812,7 +812,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
         }
     };
     [self loadObjectType:objectType cachePolicy:SFDataCachePolicyReturnCacheDataAndReloadIfExpired refreshCacheIfOlderThan:kSFMetadataRefreshInterval completion:^(SFObjectType *result, BOOL isDataFromCache) {
-        SFSmartSyncSoqlBuilder *queryBuilder = [[SFSmartSyncSoqlBuilder withFields:@"Id"] from:objectType];
+        SFSDKSoqlBuilder *queryBuilder = [[SFSDKSoqlBuilder withFields:@"Id"] from:objectType];
         NSString *whereClause = nil;
         if (result && [self isObjectTypeSearchable:result]) {
             whereClause = [NSString stringWithFormat:@"Id = '%@' FOR VIEW", objectId];
@@ -832,7 +832,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
                     
                     // Object no longer exists.
                     NSError *error = [self errorWithDescription:@"Object no longer exists"];
-                    [self log:SFLogLevelError format:@"Failed to mark %@ as being viewed, error %@", objectId, error];
+                    [SFSDKSmartSyncLogger e:[self class] format:@"Failed to mark %@ as being viewed, error %@", objectId, error];
                     callErrorBlock(error);
                 } else {
                     if (completionBlock) {
@@ -843,7 +843,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
         };
         
         SFRestFailBlock failBlock = ^(NSError *error) {
-            [self log:SFLogLevelError format:@"Failed to mark %@ as being viewed, error %@", objectId, [error localizedDescription]];
+            [SFSDKSmartSyncLogger e:[self class] format:@"Failed to mark %@ as being viewed, error %@", objectId, [error localizedDescription]];
             callErrorBlock(error);
         };
         
@@ -852,7 +852,7 @@ refreshCacheIfOlderThan:(NSTimeInterval)refreshCacheIfOlderThan
         [self.restClient performSOQLQuery:queryString failBlock:failBlock completeBlock:completeBlock];
 
     } error:^(NSError *error) {
-        [self log:SFLogLevelError format:@"Failed to mark %@ as being viewed, error %@", objectId, [error localizedDescription]];
+        [SFSDKSmartSyncLogger e:[self class] format:@"Failed to mark %@ as being viewed, error %@", objectId, [error localizedDescription]];
         callErrorBlock(error);
     }];
 }

@@ -46,6 +46,9 @@
 #import "SFAlterSoupLongOperation.h"
 #import <SalesforceSDKCore/SFUserAccountManager.h>
 #import <SalesforceSDKCore/SFDirectoryManager.h>
+#import <SalesforceSDKCore/SalesforceSDKManager.h>
+#import <SalesforceSDKCore/SFSDKEventBuilderHelper.h>
+#import <SalesforceSDKCore/SFSDKAppFeatureMarkers.h>
 
 static NSMutableDictionary *_allSharedStores;
 static NSMutableDictionary *_allGlobalSharedStores;
@@ -54,6 +57,10 @@ static BOOL _storeUpgradeHasRun = NO;
 
 // The name of the store name used by the SFSmartStorePlugin for hybrid apps
 NSString * const kDefaultSmartStoreName   = @"defaultStore";
+
+NSString * const kSFAppFeatureSmartStoreUser   = @"US";
+NSString * const kSFAppFeatureSmartStoreGlobal   = @"GS";
+
 
 // NSError constants  (TODO: We should move this stuff into a framework where errors can be configurable
 // in a plist, once we start delivering a bundle.
@@ -128,16 +135,14 @@ NSString *const EXPLAIN_ROWS = @"rows";
 - (id) initWithName:(NSString*)name user:(SFUserAccount *)user isGlobal:(BOOL)isGlobal {
     self = [super init];
     if (self)  {
-        if ((user == nil || [user.accountIdentity isEqual:[SFUserAccountManager sharedInstance].temporaryUserIdentity]) && !isGlobal) {
-            [self log:SFLogLevelWarning format:@"%@ Cannot create SmartStore with name '%@': user is not configured, and isGlobal is not configured.  Did you mean to call [%@ sharedGlobalStoreWithName:]?",
+        if (user == nil  && !isGlobal) {
+            [SFSDKSmartStoreLogger w:[self class] format:@"%@ Cannot create SmartStore with name '%@': user is not configured, and isGlobal is not configured.  Did you mean to call [%@ sharedGlobalStoreWithName:]?",
              NSStringFromSelector(_cmd),
              name,
              NSStringFromClass([self class])];
             return nil;
         }
-        
-        [self log:SFLogLevelDebug format:@"%@ %@, user: %@, isGlobal: %d", NSStringFromSelector(_cmd), name, [SFSmartStoreUtils userKeyForUser:user], isGlobal];
-        
+        [SFSDKSmartStoreLogger d:[self class] format:@"%@ %@, user: %@, isGlobal: %d", NSStringFromSelector(_cmd), name, [SFSmartStoreUtils userKeyForUser:user], isGlobal];
         @synchronized ([SFSmartStore class]) {
             if ([SFUserAccountManager sharedInstance].currentUser != nil && !_storeUpgradeHasRun) {
                 _storeUpgradeHasRun = YES;
@@ -145,15 +150,15 @@ NSString *const EXPLAIN_ROWS = @"rows";
                 [SFSmartStoreUpgrade updateEncryption];
             }
         }
-        
         _storeName = name;
         _isGlobal = isGlobal;
         _user = user;
-        
         if (_isGlobal) {
             _dbMgr = [SFSmartStoreDatabaseManager sharedGlobalManager];
+            [SFSDKAppFeatureMarkers registerAppFeature:kSFAppFeatureSmartStoreGlobal];
         } else {
             _dbMgr = [SFSmartStoreDatabaseManager sharedManagerForUser:_user];
+            [SFSDKAppFeatureMarkers registerAppFeature:kSFAppFeatureSmartStoreUser];
         }
         
         // Setup listening for data protection available / unavailable
@@ -165,7 +170,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
                                           object:nil
                                           queue:nil
                                           usingBlock:^(NSNotification *note) {
-                                              [self log:SFLogLevelDebug format:@"SFSmartStore UIApplicationProtectedDataDidBecomeAvailable"];
+                                              [SFSDKSmartStoreLogger d:[self class] format:@"SFSmartStore UIApplicationProtectedDataDidBecomeAvailable"];
                                               this->_dataProtectionKnownAvailable = YES;
                                           }];
         
@@ -174,7 +179,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
                                             object:nil
                                             queue:nil
                                             usingBlock:^(NSNotification *note) {
-                                                [self log:SFLogLevelDebug format:@"SFSmartStore UIApplicationProtectedDataWillBecomeUnavailable"];
+                                                [SFSDKSmartStoreLogger d:[self class] format:@"SFSmartStore UIApplicationProtectedDataWillBecomeUnavailable"];
                                                 this->_dataProtectionKnownAvailable = NO;
                                             }];
         
@@ -204,7 +209,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
 }
 
 - (void)dealloc {
-    [self log:SFLogLevelDebug format:@"dealloc store: '%@'",_storeName];
+    [SFSDKSmartStoreLogger d:[self class] format:@"dealloc store: '%@'", _storeName];
     [self.storeQueue close];
     SFRelease(_soupNameToTableName);
     SFRelease(_attrSpecBySoup);
@@ -240,14 +245,12 @@ NSString *const EXPLAIN_ROWS = @"rows";
 
     // Delete db file if its setup was not successful
     if (!result) {
-        [self log:SFLogLevelError format:@"Deleting store dir since we can't set it up properly: %@", self.storeName];
+        [SFSDKSmartStoreLogger e:[self class] format:@"Deleting store dir since we can't set it up properly: %@", self.storeName];
         [self.dbMgr removeStoreDir:self.storeName];
     }
-    
     if (self.user != nil) {
         [SFSmartStoreUpgrade setUsesKeyStoreEncryption:result forUser:self.user store:self.storeName];
     }
-    
     return result;
 }
 
@@ -278,9 +281,8 @@ NSString *const EXPLAIN_ROWS = @"rows";
    NSError *openDbError = nil;
     self.storeQueue = [self.dbMgr openStoreQueueWithName:self.storeName key:[[self class] encKey] error:&openDbError];
     if (self.storeQueue == nil) {
-        [self log:SFLogLevelError format:@"Error opening store '%@': %@", self.storeName, [openDbError localizedDescription]];
+        [SFSDKSmartStoreLogger e:[self class] format:@"Error opening store '%@': %@", self.storeName, [openDbError localizedDescription]];
     }
-    
     return (self.storeQueue != nil);
 }
 
@@ -302,10 +304,9 @@ NSString *const EXPLAIN_ROWS = @"rows";
 + (id)sharedStoreWithName:(NSString*)storeName user:(SFUserAccount *)user {
     @synchronized (self) {
         if (user == nil) {
-            [SFLogger log:self level:SFLogLevelWarning format:@"%@ Cannot create shared store with name '%@' for nil user.  Did you mean to call [%@ sharedGlobalStoreWithName:]?", NSStringFromSelector(_cmd), storeName, NSStringFromClass(self)];
+            [SFSDKSmartStoreLogger w:[self class] format:@"%@ Cannot create shared store with name '%@' for nil user.  Did you mean to call [%@ sharedGlobalStoreWithName:]?", NSStringFromSelector(_cmd), storeName, NSStringFromClass(self)];
             return nil;
         }
-        
         if (nil == _allSharedStores) {
             _allSharedStores = [NSMutableDictionary dictionary];
         }
@@ -314,18 +315,18 @@ NSString *const EXPLAIN_ROWS = @"rows";
             // if user key is nil for any reason, return nil directly here otherwise app will crash with nil userKey
             return nil;
         }
-        
         if (_allSharedStores[userKey] == nil) {
             _allSharedStores[userKey] = [NSMutableDictionary dictionary];
         }
-        
         SFSmartStore *store = _allSharedStores[userKey][storeName];
         if (nil == store) {
             store = [[self alloc] initWithName:storeName user:user];
             if (store)
                 _allSharedStores[userKey][storeName] = store;
+            
+            NSInteger numUserStores = [(NSDictionary *)(_allSharedStores[userKey]) count];
+            [SFSDKEventBuilderHelper createAndStoreEvent:@"userSmartStoreInit" userAccount:user className:NSStringFromClass([self class]) attributes:@{ @"numUserStores" : [NSNumber numberWithInteger:numUserStores] }];
         }
-        
         return store;
     }
 }
@@ -335,14 +336,14 @@ NSString *const EXPLAIN_ROWS = @"rows";
         if (nil == _allGlobalSharedStores) {
             _allGlobalSharedStores = [NSMutableDictionary dictionary];
         }
-
         SFSmartStore *store = _allGlobalSharedStores[storeName];
         if (nil == store) {
             store = [[self alloc] initWithName:storeName user:nil isGlobal:YES];
             if (store)
                 _allGlobalSharedStores[storeName] = store;
         }
-        
+        NSInteger numGlobalStores = _allGlobalSharedStores.allKeys.count;
+        [SFSDKEventBuilderHelper createAndStoreEvent:@"globalSmartStoreInit" userAccount:nil className:NSStringFromClass([self class]) attributes:@{ @"numGlobalStores" : [NSNumber numberWithInteger:numGlobalStores] }];
         return store;
     }
 }
@@ -356,11 +357,10 @@ NSString *const EXPLAIN_ROWS = @"rows";
 + (void)removeSharedStoreWithName:(NSString*)storeName forUser:(SFUserAccount *)user {
     @synchronized (self) {
         if (user == nil) {
-            [SFLogger log:self level:SFLogLevelInfo format:@"%@ Cannot remove store with name '%@' for nil user.  Did you mean to call [%@ removeSharedGlobalStoreWithName:]?", NSStringFromSelector(_cmd), storeName, NSStringFromClass(self)];
+            [SFSDKSmartStoreLogger i:[self class] format:@"%@ Cannot remove store with name '%@' for nil user.  Did you mean to call [%@ removeSharedGlobalStoreWithName:]?", NSStringFromSelector(_cmd), storeName, NSStringFromClass(self)];
             return;
         }
-        
-        [self log:SFLogLevelDebug format:@"removeSharedStoreWithName: %@, user: %@", storeName, user];
+        [SFSDKSmartStoreLogger d:[self class] format:@"removeSharedStoreWithName: %@, user: %@", storeName, user];
         NSString *userKey = [SFSmartStoreUtils userKeyForUser:user];
         SFSmartStore *existingStore = _allSharedStores[userKey][storeName];
         if (nil != existingStore) {
@@ -374,7 +374,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
 
 + (void)removeSharedGlobalStoreWithName:(NSString *)storeName {
     @synchronized (self) {
-        [SFLogger log:self level:SFLogLevelDebug format:@"%@ %@", NSStringFromSelector(_cmd), storeName];
+        [SFSDKSmartStoreLogger d:[self class] format:@"%@ %@", NSStringFromSelector(_cmd), storeName];
         SFSmartStore *existingStore = _allGlobalSharedStores[storeName];
         if (nil != existingStore) {
             [existingStore.storeQueue close];
@@ -393,7 +393,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
 + (void)removeAllStoresForUser:(SFUserAccount *)user {
     @synchronized (self) {
         if (user == nil) {
-            [SFLogger log:self level:SFLogLevelInfo format:@"%@ Cannot remove all stores for nil user.  Did you mean to call [%@ removeAllGlobalStores]?", NSStringFromSelector(_cmd), NSStringFromClass(self)];
+            [SFSDKSmartStoreLogger i:[self class] format:@"%@ Cannot remove all stores for nil user. Did you mean to call [%@ removeAllGlobalStores]?", NSStringFromSelector(_cmd), NSStringFromClass(self)];
             return;
         }
         
@@ -414,6 +414,18 @@ NSString *const EXPLAIN_ROWS = @"rows";
     }
 }
 
++ (NSArray *)allStoreNames {
+    @synchronized (self) {
+        NSArray *allStoreNames = [[SFSmartStoreDatabaseManager sharedManagerForUser:[SFUserAccountManager sharedInstance].currentUser] allStoreNames];
+        return allStoreNames;
+    }
+}
+
++ (NSArray *)allGlobalStoreNames {
+    @synchronized (self) {
+        return [[SFSmartStoreDatabaseManager sharedGlobalManager] allStoreNames];
+    }
+}
 + (void)clearSharedStoreMemoryState
 {
     @synchronized (self) {
@@ -440,10 +452,8 @@ NSString *const EXPLAIN_ROWS = @"rows";
                                          COLUMN_NAME_COL,
                                          COLUMN_TYPE_COL
                                          ];
-    
-    [self log:SFLogLevelDebug format:@"createSoupIndexTableSql: %@",createSoupIndexTableSql];
-    
-    
+    [SFSDKSmartStoreLogger d:[self class] format:@"createSoupIndexTableSql: %@", createSoupIndexTableSql];
+
     // Create SOUP_ATTRS_TABLE
     // The table name for the soup will simply be TABLE_<soupId>
     NSString *createSoupNamesTableSql = [NSString stringWithFormat:
@@ -452,17 +462,13 @@ NSString *const EXPLAIN_ROWS = @"rows";
                                          ID_COL,
                                          SOUP_NAME_COL
                                          ];
-    
-    
-    [self log:SFLogLevelDebug format:@"createSoupNamesTableSql: %@",createSoupNamesTableSql];
+    [SFSDKSmartStoreLogger d:[self class] format:@"createSoupNamesTableSql: %@", createSoupNamesTableSql];
     
     // Create an index for SOUP_NAME_COL in SOUP_ATTRS_TABLE
     NSString *createSoupNamesIndexSql = [NSString stringWithFormat:
                                          @"CREATE INDEX %@_0 on %@ ( %@ )",
                                          SOUP_ATTRS_TABLE, SOUP_ATTRS_TABLE, SOUP_NAME_COL];
-    [self log:SFLogLevelDebug format:@"createSoupNamesIndexSql: %@",createSoupNamesIndexSql];
-    
-    
+    [SFSDKSmartStoreLogger d:[self class] format:@"createSoupNamesIndexSql: %@", createSoupNamesIndexSql];
     [self executeUpdateThrows:createSoupIndexTableSql withDb:db];
     [self executeUpdateThrows:createSoupNamesTableSql withDb:db];
     [self createLongOperationsStatusTableWithDb:db];
@@ -479,8 +485,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
                                           SOUP_ATTRS_TABLE,
                                           attrColName
                                           ];
-            
-            [self log:SFLogLevelDebug format:@"addAttrColSql: %@",addAttrColSql];
+            [SFSDKSmartStoreLogger d:[self class] format:@"addAttrColSql: %@", addAttrColSql];
             [self executeUpdateThrows:addAttrColSql withDb:db];
         }
     } error:nil];
@@ -524,8 +529,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
             CREATED_COL,
             LAST_MODIFIED_COL
          ];
-    
-    [self log:SFLogLevelDebug format:@"createLongOperationsStatusTableSql: %@",createLongOperationsStatusTableSql];
+    [SFSDKSmartStoreLogger d:[self class] format:@"createLongOperationsStatusTableSql: %@", createLongOperationsStatusTableSql];
     [self executeUpdateThrows:createLongOperationsStatusTableSql withDb:db];
 }
 
@@ -622,7 +626,6 @@ NSString *const EXPLAIN_ROWS = @"rows";
 }
 
 - (void) logAndThrowLastError:(NSString*)message  withDb:(FMDatabase*)db {
-    
     @throw [NSException exceptionWithName:message reason:[db lastErrorMessage] userInfo:nil];
 }
 
@@ -745,7 +748,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     NSString *dir = [self externalStorageSoupDirectory:soupTableName];
     BOOL dirExists = [SFDirectoryManager ensureDirectoryExists:dir error:&error];
     if (!dirExists) {
-        [self log:SFLogLevelError format:@"Failed to create external storage directory at path '%@', error: %@", dir, error];
+        [SFSDKSmartStoreLogger e:[self class] format:@"Failed to create external storage directory at path '%@', error: %@", dir, error];
     }
     return dirExists;
 }
@@ -755,6 +758,9 @@ NSString *const EXPLAIN_ROWS = @"rows";
                   soupTableName:(NSString *)soupTableName {
     NSString *filePath = [self externalStorageSoupFilePath:soupEntryId
                                              soupTableName:soupTableName];
+    if (filePath == nil) {
+        return NO;
+    }
     NSOutputStream *outputStream = nil;
     SFSmartStoreEncryptionKeyBlock keyBlock = [SFSmartStore encryptionKeyBlock];
     if (keyBlock) {
@@ -779,9 +785,8 @@ NSString *const EXPLAIN_ROWS = @"rows";
                                   filePath,
                                   error];
         NSAssert(NO, errorMessage);
-        [self log:SFLogLevelError msg:errorMessage];
+        [SFSDKSmartStoreLogger e:[self class] format:errorMessage];
     }
-    
     return success;
 }
 
@@ -812,9 +817,8 @@ NSString *const EXPLAIN_ROWS = @"rows";
                                   filePath,
                                   error];
         NSAssert(NO, errorMessage);
-        [self log:SFLogLevelError msg:errorMessage];
+        [SFSDKSmartStoreLogger e:[self class] format:errorMessage];
     }
-    
     return result;
 }
 
@@ -825,7 +829,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     NSError *delError = nil;
     if (![[NSFileManager defaultManager] removeItemAtPath:filePath
                                                     error:&delError]) {
-        [self log:SFLogLevelError format:@"Failed to delete external entry at path '%@', error: %@.", filePath, delError];
+        [SFSDKSmartStoreLogger e:[self class] format:@"Failed to delete external entry at path '%@', error: %@.", filePath, delError];
     }
 }
 
@@ -835,7 +839,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     
     NSError *deleteDirError = nil;
     if (![[NSFileManager defaultManager] removeItemAtPath:dirPath error:&deleteDirError]) {
-        [self log:SFLogLevelError format:@"Failed to delete external soup dir path '%@', error: %@.", dirPath, deleteDirError];
+        [SFSDKSmartStoreLogger e:[self class] format:@"Failed to delete external soup dir path '%@', error: %@.", dirPath, deleteDirError];
     }
     
     // Re-create dir if necessary
@@ -869,9 +873,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     
     NSString *insertSql = [NSString stringWithFormat:@"INSERT INTO %@ (%@) VALUES (%@)",
                            tableName, fieldNames, fieldValueMarkers];
-    //[self log:SFLogLevelDebug format:@"insertSql: %@ binds: %@",insertSql,binds];
     [self executeUpdateThrows:insertSql withArgumentsInArray:binds withDb:db];
-    
 }
 
 - (void)updateTable:(NSString*)tableName values:(NSDictionary*)map entryId:(NSNumber *)entryId idCol:(NSString*)idCol withDb:(FMDatabase*) db
@@ -892,13 +894,9 @@ NSString *const EXPLAIN_ROWS = @"rows";
          [binds addObject:obj];
          fieldCount++;
      }];
-    
     [binds addObject:entryId];
-    
-    
     NSString *updateSql = [NSString stringWithFormat:@"UPDATE %@ SET %@ WHERE %@ = ?",
                            tableName, fieldEntries, idCol];
-    //[self log:SFLogLevelDebug format:@"upsertSql: %@ binds: %@",upsertSql,binds];
     [self executeUpdateThrows:updateSql withArgumentsInArray:binds withDb:db];
 }
 
@@ -919,9 +917,8 @@ NSString *const EXPLAIN_ROWS = @"rows";
         result = [frs stringForColumnIndex:0];
     }
     [frs close];
-    
     if (nil == result) {
-        [self log:SFLogLevelDebug format:@"Unknown index path '%@' in soup '%@' ",path,soupName];
+        [SFSDKSmartStoreLogger d:[self class] format:@"Unknown index path '%@' in soup '%@' ", path, soupName];
     }
     return result;
     
@@ -938,28 +935,26 @@ NSString *const EXPLAIN_ROWS = @"rows";
 
 - (NSString*) convertSmartSql:(NSString*)smartSql withDb:(FMDatabase*)db
 {
-    [self log:SFLogLevelVerbose format:@"convertSmartSQl:%@", smartSql];
+    [SFSDKSmartStoreLogger v:[self class] format:@"convertSmartSQl:%@", smartSql];
     NSObject* sql = _smartSqlToSql[smartSql];
-    
     if (nil == sql) {
         sql = [[SFSmartSqlHelper sharedInstance] convertSmartSql:smartSql withStore:self withDb:db];
         
         // Conversion failed, putting the NULL in the cache so that we don't retry conversion
         if (sql == nil) {
-            [self log:SFLogLevelVerbose format:@"convertSmartSql:putting NULL in cache"];
+            [SFSDKSmartStoreLogger v:[self class] format:@"convertSmartSql:putting NULL in cache"];
             _smartSqlToSql[smartSql] = [NSNull null];
         }
         // Updating cache
         else {
-            [self log:SFLogLevelVerbose format:@"convertSmartSql:putting %@ in cache", sql];
+            [SFSDKSmartStoreLogger v:[self class] format:@"convertSmartSql:putting %@ in cache", sql];
             _smartSqlToSql[smartSql] = sql;
         }
     }
     else if ([sql isEqual:[NSNull null]]) {
-        [self log:SFLogLevelVerbose format:@"convertSmartSql:found NULL in cache"];
+        [SFSDKSmartStoreLogger v:[self class] format:@"convertSmartSql:found NULL in cache"];
         return nil;
     }
-    
     return (NSString*) sql;
 }
 
@@ -998,9 +993,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     
     if (nil == soupTableName) {
         NSString *sql = [NSString stringWithFormat:@"SELECT %@ FROM %@ WHERE %@ = ?",ID_COL,SOUP_ATTRS_TABLE,SOUP_NAME_COL];
-        //    [self log:SFLogLevelDebug format:@"tableName query: %@",sql];
         FMResultSet *frs = [self executeQueryThrows:sql withArgumentsInArray:@[soupName] withDb:db];
-        
         if ([frs next]) {
             int colIdx = [frs columnIndexForName:ID_COL];
             long soupId = [frs longForColumnIndex:colIdx];
@@ -1009,7 +1002,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
             // update cache
             _soupNameToTableName[soupName] = soupTableName;
         } else {
-            [self log:SFLogLevelDebug format:@"No table for: '%@'",soupName];
+            [SFSDKSmartStoreLogger d:[self class] format:@"No table for: '%@'", soupName];
         }
         [frs close];
     }
@@ -1052,8 +1045,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     if (nil == attrs) {
         //no cached attributes ...reload from SOUP_ATTRS_TABLE
         NSString *attrsSql = [NSString stringWithFormat:@"SELECT * FROM %@ WHERE %@ = ?", SOUP_ATTRS_TABLE, SOUP_NAME_COL];
-        [self log:SFLogLevelDebug format:@"attrs sql: %@",attrsSql];
-        
+        [SFSDKSmartStoreLogger d:[self class] format:@"attrs sql: %@", attrsSql];
         FMResultSet *frs = [self executeQueryThrows:attrsSql withArgumentsInArray:@[soupName] withDb:db];
         if ([frs next]) {
             NSMutableArray *soupFeatures = [[NSMutableArray alloc] init];
@@ -1064,15 +1056,14 @@ NSString *const EXPLAIN_ROWS = @"rows";
             }
             attrs = [SFSoupSpec newSoupSpec:soupName withFeatures:soupFeatures];
             
-            //update the cache
+            // update the cache
             _attrSpecBySoup[soupName] = attrs;
         }
-        
         [frs close];
     }
     
     if (!attrs) {
-        [self log:SFLogLevelDebug format:@"no attributes for '%@'",soupName];
+        [SFSDKSmartStoreLogger d:[self class] format:@"no attributes for '%@'", soupName];
     }
     return attrs;
 }
@@ -1096,25 +1087,22 @@ NSString *const EXPLAIN_ROWS = @"rows";
                               PATH_COL, COLUMN_NAME_COL, COLUMN_TYPE_COL,
                               SOUP_INDEX_MAP_TABLE,
                               SOUP_NAME_COL];
-        [self log:SFLogLevelDebug format:@"indices sql: %@",querySql];
+        [SFSDKSmartStoreLogger d:[self class] format:@"indices sql: %@", querySql];
         FMResultSet *frs = [self executeQueryThrows:querySql withArgumentsInArray:@[soupName] withDb:db];
-        
         while([frs next]) {
             NSString *path = [frs stringForColumn:PATH_COL];
             NSString *columnName = [frs stringForColumn:COLUMN_NAME_COL];
             NSString *type = [frs stringForColumn:COLUMN_TYPE_COL];
-            
             SFSoupIndex *spec = [[SFSoupIndex alloc] initWithPath:path indexType:type columnName:columnName];
             [result addObject:spec];
         }
         [frs close];
         
-        //update the cache
+        // update the cache
         _indexSpecsBySoup[soupName] = result;
     }
-    
     if (!(result.count > 0)) {
-        [self log:SFLogLevelDebug format:@"no indices for '%@'",soupName];
+        [SFSDKSmartStoreLogger d:[self class] format:@"no indices for '%@'", soupName];
     }
     return result;
 }
@@ -1156,10 +1144,10 @@ NSString *const EXPLAIN_ROWS = @"rows";
     }
     [self insertIntoTable:SOUP_ATTRS_TABLE values:soupMapValues withDb:db];
 
-    //Get a safe table name for the soupName
+    // Get a safe table name for the soupName
     NSString *soupTableName = [self tableNameBySoupId:[db lastInsertRowId]];
     if (nil == soupTableName) {
-        [self log:SFLogLevelDebug format:@"couldn't properly register soupName: '%@' ",soupSpec.soupName];
+        [SFSDKSmartStoreLogger d:[self class] format:@"couldn't properly register soupName: '%@' ", soupSpec.soupName];
     }
     return soupTableName;
 }
@@ -1228,7 +1216,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     if (soupUsesExternalStorage && soupUsesJSON1) {
         @throw [NSException exceptionWithName:@"Can't have JSON1 index specs in externally stored soup" reason:nil userInfo:nil];
     }
-    
+   
     if (nil == soupTableName) {
         soupTableName = [self registerNewSoupWithSpec:soupSpec withDb:db];
     } else {
@@ -1237,13 +1225,11 @@ NSString *const EXPLAIN_ROWS = @"rows";
         [self updateExistingSoupFeaturesWithSpec:soupSpec
                                withSoupTableName:soupTableName
                                           withDb:db];
-        [self log:SFLogLevelDebug
-           format:@"==== Creating %@ ('%@', features: '%@') ====",
-            soupTableName,
-            soupSpec.soupName,
-            soupSpec.features?:@[]];
+        [SFSDKSmartStoreLogger d:[self class] format:@"==== Creating %@ ('%@', features: '%@') ====",
+         soupTableName,
+         soupSpec.soupName,
+         soupSpec.features?:@[]];
     }
-    
     NSMutableArray *soupIndexMapInserts = [[NSMutableArray alloc] init ];
     NSMutableArray *createIndexStmts = [[NSMutableArray alloc] init ];
     NSMutableString *createTableStmt = [[NSMutableString alloc] init];
@@ -1296,12 +1282,12 @@ NSString *const EXPLAIN_ROWS = @"rows";
     }
     
     [createTableStmt appendString:@")"];
-    [self log:SFLogLevelDebug format:@"createTableStmt: %@",createTableStmt];
+    [SFSDKSmartStoreLogger d:[self class] format:@"createTableStmt: %@", createTableStmt];
     
     // fts
     if (columnsForFts.count > 0) {
         [createFtsStmt appendFormat:@"CREATE VIRTUAL TABLE %@_fts USING fts%u(%@)", soupTableName, (unsigned)self.ftsExtension, [columnsForFts componentsJoinedByString:@","]];
-        [self log:SFLogLevelDebug format:@"createFtsStmt: %@",createFtsStmt];
+        [SFSDKSmartStoreLogger d:[self class] format:@"createFtsStmt: %@", createFtsStmt];
     }
     
     // create the main soup table
@@ -1314,11 +1300,26 @@ NSString *const EXPLAIN_ROWS = @"rows";
     
     // create indices for this soup
     for (NSString *createIndexStmt in createIndexStmts) {
-        [self log:SFLogLevelDebug format:@"createIndexStmt: %@",createIndexStmt];
+        [SFSDKSmartStoreLogger d:[self class] format:@"createIndexStmt: %@", createIndexStmt];
         [self executeUpdateThrows:createIndexStmt withDb:db];
     }
     [self insertIntoSoupIndexMap:soupIndexMapInserts withDb:db];
-    
+
+    // Logs analytics event.
+    NSMutableArray<NSString *> *features = [[NSMutableArray alloc] init];
+    if (soupUsesJSON1) {
+        [features addObject:@"JSON1"];
+    }
+    if (soupUsesExternalStorage) {
+        [features addObject:@"ExternalStorage"];
+    }
+    if ([SFSoupIndex hasFts:indexSpecs]) {
+        [features addObject:@"FTS"];
+    }
+    NSMutableDictionary *attributes = [[NSMutableDictionary alloc] init];
+    attributes[@"features"] = features;
+    [SFSDKEventBuilderHelper createAndStoreEvent:@"registerSoup" userAccount:self.user className:NSStringFromClass([self class]) attributes:attributes];
+
     // if soup uses external storage, create the dir now
     if (soupUsesExternalStorage) {
         if (![self createExternalStorageDirectory:soupTableName]) {
@@ -1336,7 +1337,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
 }
 
 - (void)removeSoup:(NSString*)soupName withDb:(FMDatabase*)db {
-    [self log:SFLogLevelDebug format:@"removeSoup: %@", soupName];
+    [SFSDKSmartStoreLogger d:[self class] format:@"removeSoup: %@", soupName];
     NSString *soupTableName = [self tableNameForSoup:soupName withDb:db];
     if (nil == soupTableName)
         return;
@@ -1370,7 +1371,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     for (NSString* smartSql in [_smartSqlToSql allKeys]) {
         if ([smartSql rangeOfString:soupRef].location != NSNotFound) {
             [keysToRemove addObject:smartSql];
-            [self log:SFLogLevelDebug format:@"removeSoup: removing cached sql for %@", smartSql];
+            [SFSDKSmartStoreLogger d:[self class] format:@"removeSoup: removing cached sql for %@", smartSql];
         }
     }
     [_smartSqlToSql removeObjectsForKeys:keysToRemove];
@@ -1399,7 +1400,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     for (NSString* smartSql in [_smartSqlToSql allKeys]) {
         if ([smartSql rangeOfString:soupRef].location != NSNotFound) {
             [keysToRemove addObject:smartSql];
-            [self log:SFLogLevelDebug format:@"removeSoup: removing cached sql for %@", smartSql];
+            [SFSDKSmartStoreLogger d:[self class] format:@"removeSoup: removing cached sql for %@", smartSql];
         }
     }
     [_smartSqlToSql removeObjectsForKeys:keysToRemove];
@@ -1502,12 +1503,12 @@ NSString *const EXPLAIN_ROWS = @"rows";
 
 - (NSUInteger)countWithQuerySpec:(SFQuerySpec*)querySpec withDb:(FMDatabase*)db
 {
-    [self log:SFLogLevelDebug format:@"countWithQuerySpec: \nquerySpec:%@ \n", querySpec];
+    [SFSDKSmartStoreLogger d:[self class] format:@"countWithQuerySpec: \nquerySpec:%@ \n", querySpec];
     NSUInteger result = 0;
     
     // SQL
     NSString* countSql = [self convertSmartSql:querySpec.countSmartSql withDb:db];
-    [self log:SFLogLevelDebug format:@"countWithQuerySpec: countSql:%@ \n", countSql];
+    [SFSDKSmartStoreLogger d:[self class] format:@"countWithQuerySpec: countSql:%@ \n", countSql];
 
     // Args
     NSArray* args = [querySpec bindsForQuerySpec];
@@ -1533,8 +1534,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
 
 - (NSArray *)queryWithQuerySpec:(SFQuerySpec *)querySpec pageIndex:(NSUInteger)pageIndex withDb:(FMDatabase*)db
 {
-    // [self log:SFLogLevelDebug format:@"queryWithQuerySpec: \nquerySpec:%@ \n", querySpec];
-    NSMutableArray* result = [NSMutableArray arrayWithCapacity:querySpec.pageSize];
+    NSMutableArray* result = [NSMutableArray new]; // to get all records in one shot, caller might specify a large pageSize - we don't want to blindly allocate an array of size pageSize
     
     // Page
     NSUInteger offsetRows = querySpec.pageSize * pageIndex;
@@ -1544,7 +1544,6 @@ NSString *const EXPLAIN_ROWS = @"rows";
     // SQL
     NSString* sql = [self convertSmartSql: querySpec.smartSql withDb:db];
     NSString* limitSql = [@[@"SELECT * FROM (", sql, @") LIMIT ", limit] componentsJoinedByString:@""];
-    // [self log:SFLogLevelDebug format:@"queryWithQuerySpec: \nlimitSql:%@ \npageIndex:%d \n", limitSql, pageIndex];
     
     // Args
     NSArray* args = [querySpec bindsForQuerySpec];
@@ -1654,7 +1653,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
     
     NSString *soupTableName = [self tableNameForSoup:soupName withDb:db];
     if (nil == soupTableName) {
-        [self log:SFLogLevelDebug format:@"Soup: '%@' does not exist",soupName];
+        [SFSDKSmartStoreLogger d:[self class] format:@"Soup: '%@' does not exist", soupName];
         return result;
     }
     
@@ -1846,7 +1845,7 @@ NSString *const EXPLAIN_ROWS = @"rows";
             if (error != nil && *error != nil) {
                 NSString *errorMsg = [NSString stringWithFormat:kSFSmartStoreExtIdLookupError,
                                       externalIdPath, fieldValue, [*error localizedDescription]];
-                [self log:SFLogLevelDebug format:@"%@", errorMsg];
+                [SFSDKSmartStoreLogger d:[self class] format:@"%@", errorMsg];
                 return nil;
             }
         }
@@ -2222,10 +2221,10 @@ NSString *const EXPLAIN_ROWS = @"rows";
                                                  SOUP_NAMES_TABLE,
                                                  SOUP_ATTRS_TABLE
                                                  ];
-            
-            [self log:SFLogLevelDebug format:@"renameSoupNamesTableSql: %@",renameSoupNamesTableSql];
+            [SFSDKSmartStoreLogger d:[self class] format:@"renameSoupNamesTableSql: %@", renameSoupNamesTableSql];
             [self executeUpdateThrows:renameSoupNamesTableSql withDb:db];
         }
     } error:nil];
 }
+
 @end

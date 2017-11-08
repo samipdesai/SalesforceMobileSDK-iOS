@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  Author: Kevin Hawkins
  
  Redistribution and use of this software in source and binary forms, with or without modification,
@@ -28,17 +28,28 @@
 #import "SFOAuthInfo.h"
 #import "SFUserAccountManager.h"
 #import "SFIdentityCoordinator.h"
+#import "SalesforceSDKConstants.h"
 @class SFAuthenticationManager;
 @class SFAuthenticationViewHandler;
+@class SFAuthenticationSafariControllerHandler;
 @class SFAuthErrorHandler;
 @class SFAuthErrorHandlerList;
 @class SFLoginHostUpdateResult;
 @class SFLoginViewController;
+
+typedef NS_ENUM(NSUInteger, SFAuthenticationManagerDelegatePriority) {
+    SFAuthenticationManagerDelegatePriorityMax = 0,
+    SFAuthenticationManagerDelegatePriorityHigh,
+    SFAuthenticationManagerDelegatePriorityMedium,
+    SFAuthenticationManagerDelegatePriorityLow,
+    SFAuthenticationManagerDelegatePriorityDefault,
+};
+
 NS_ASSUME_NONNULL_BEGIN
 /**
  Callback block definition for OAuth completion callback.
  */
-typedef void (^SFOAuthFlowSuccessCallbackBlock)(SFOAuthInfo *);
+typedef void (^SFOAuthFlowSuccessCallbackBlock)(SFOAuthInfo *, SFUserAccount *);
 
 /**
  Callback block definition for OAuth failure callback.
@@ -164,6 +175,13 @@ typedef void (^SFOAuthFlowFailureCallbackBlock)(SFOAuthInfo *, NSError *);
 - (void)authManagerDidCancelBrowserFlow:(SFAuthenticationManager *)manager;
 
 /**
+ Called when the auth manager is going to present the safari view controller.
+ @param manager The instance of SFAuthenticationManager making the call.
+ @param svc The instance of the safari view controller to be presented.
+ */
+- (void)authManager:(SFAuthenticationManager *)manager willDisplayAuthSafariViewController:(SFSafariViewController *)svc;
+
+/**
  Called when a generic flow authentication is cancelled.
  @param manager The instance of SFAuthenticationManager making the call.
 */
@@ -191,6 +209,31 @@ extern NSString * const kSFUserLoggedInNotification;
  successfully to authorize the user and fetched the identity information.
  */
 extern NSString * const kSFAuthenticationManagerFinishedNotification;
+
+/**
+  Default used as last resort
+ */
+extern NSString * const kSFUserAccountOAuthLoginHostDefault;
+
+/**
+ Key identifying login host
+ */
+extern NSString * const kSFUserAccountOAuthLoginHost;
+
+/**
+ The key for storing the persisted OAuth scopes.
+ */
+extern  NSString * const kOAuthScopesKey;
+
+/**
+The key for storing the persisted OAuth client ID.
+ */
+extern  NSString * const kOAuthClientIdKey;
+
+/**
+The key for storing the persisted OAuth redirect URI.
+ */
+extern  NSString * const kOAuthRedirectUriKey;
 
 /**
  This class handles all the authentication related tasks, which includes login, logout and session refresh
@@ -242,6 +285,13 @@ extern NSString * const kSFAuthenticationManagerFinishedNotification;
 @property (nonatomic, strong) SFAuthenticationViewHandler *authViewHandler;
 
 /**
+ The property denoting the handler for presenting the authentication controller (for advanced auth flows)
+ You can override this handler if you want to have a custom work flow for displaying the authentication
+ controller.
+ */
+@property (nonatomic, strong) SFAuthenticationSafariControllerHandler *authSafariControllerHandler;
+
+/**
  The auth handler for invalid credentials.
  */
 @property (nonatomic, readonly) SFAuthErrorHandler *invalidCredentialsAuthErrorHandler;
@@ -290,10 +340,55 @@ extern NSString * const kSFAuthenticationManagerFinishedNotification;
 @property (nonatomic, strong) NSArray * additionalOAuthParameterKeys;
 
 /**
+ A dictionary of additional parameters (key value pairs) to send during token refresh
+ */
+@property (nonatomic, strong) NSDictionary * additionalTokenRefreshParams;
+
+/** The host that will be used for login.
+ */
+@property (nonatomic, strong, nullable) NSString *loginHost;
+
+/** Should the login process start again if it fails (default: YES)
+ */
+@property (nonatomic, assign) BOOL retryLoginAfterFailure;
+
+/** OAuth client ID to use for login.  Apps may customize
+ by setting this property before login; otherwise, this
+ value is determined by the SFDCOAuthClientIdPreference
+ configured via the settings bundle.
+ */
+@property (nonatomic, copy, nullable) NSString *oauthClientId;
+
+/** OAuth callback url to use for the OAuth login process.
+ Apps may customize this by setting this property before login.
+ By default this value is picked up from the main
+ bundle property SFDCOAuthRedirectUri
+ default: @"sfdc:///axm/detect/oauth/done")
+ */
+@property (nonatomic, copy, nullable) NSString *oauthCompletionUrl;
+
+/**
+ The Branded Login path configured for this application.
+ */
+@property (nonatomic, nullable, copy) NSString *brandLoginPath;
+
+/**
+ The OAuth scopes associated with the app.
+ */
+@property (nonatomic, copy) NSSet<NSString*> *scopes;
+
+/**
  Adds a delegate to the list of authentication manager delegates.
  @param delegate The delegate to add to the list.
  */
 - (void)addDelegate:(id<SFAuthenticationManagerDelegate>)delegate;
+
+/**
+ Adds a delegate to the list of authentication manager delegates.
+ @param delegate The delegate to add to the list.
+ @param priority The priority for this delegate. Delegates get called in order of priority.
+ */
+- (void)addDelegate:(id<SFAuthenticationManagerDelegate>)delegate withPriority:(SFAuthenticationManagerDelegatePriority)priority;
 
 /**
  Removes a delegate from the delegate list.  No action is taken if the delegate does not exist.
@@ -302,29 +397,55 @@ extern NSString * const kSFAuthenticationManagerFinishedNotification;
 - (void)removeDelegate:(id<SFAuthenticationManagerDelegate>)delegate;
 
 /**
- Kick off the login process for either the current user, or a new user if the current user is not
- configured.
+ Kick off the login process for credentials that's previously configured.
  @param completionBlock The block of code to execute when the authentication process successfully completes.
  @param failureBlock The block of code to execute when the authentication process has a fatal failure.
  @return YES if this call kicks off the authentication process.  NO if an authentication process has already
  started, in which case subsequent requests are queued up to have their completion or failure blocks executed
  in succession.
  */
-- (BOOL)loginWithCompletion:(SFOAuthFlowSuccessCallbackBlock)completionBlock
-                    failure:(SFOAuthFlowFailureCallbackBlock)failureBlock;
+- (BOOL)loginWithCompletion:(nullable SFOAuthFlowSuccessCallbackBlock)completionBlock
+                    failure:(nullable SFOAuthFlowFailureCallbackBlock)failureBlock;
 
 /**
- Kick off the login process for the given user.
- @param completionBlock The block of code to execute when the authentication process successfully completes.
- @param failureBlock The block of code to execute when the authentication process has a fatal failure.
- @param account User account to be logged in.
+ Kick off the refresh process for the specified credentials.
+ Note: This method is deprecated.  Use refreshCredentials:completion:failure: to refresh existing credentials.
+ @param completionBlock The block of code to execute when the refresh process successfully completes.
+ @param failureBlock The block of code to execute when the refresh process has a fatal failure.
+ @param credentials SFOAuthCredentials to be refreshed.
  @return YES if this call kicks off the authentication process.  NO if an authentication process has already
  started, in which case subsequent requests are queued up to have their completion or failure blocks executed
  in succession.
  */
-- (BOOL)loginWithCompletion:(SFOAuthFlowSuccessCallbackBlock)completionBlock
-                    failure:(SFOAuthFlowFailureCallbackBlock)failureBlock
-                    account:(nullable SFUserAccount *)account;
+- (BOOL)loginWithCompletion:(nullable SFOAuthFlowSuccessCallbackBlock)completionBlock
+                    failure:(nullable SFOAuthFlowFailureCallbackBlock)failureBlock
+                credentials:(nullable SFOAuthCredentials *)credentials SFSDK_DEPRECATED(5.2, 6.0, "Use refreshCredentials:completion:failure: to refresh existing credentials.");
+
+/**
+ Kick off the refresh process for the specified credentials.
+ @param credentials SFOAuthCredentials to be refreshed.
+ @param completionBlock The block of code to execute when the refresh process successfully completes.
+ @param failureBlock The block of code to execute when the refresh process has a fatal failure.
+ @return YES if this call kicks off the authentication process.  NO if an authentication process has already
+ started, in which case subsequent requests are queued up to have their completion or failure blocks executed
+ in succession.
+ */
+- (BOOL)refreshCredentials:(nonnull SFOAuthCredentials *)credentials
+                completion:(nullable SFOAuthFlowSuccessCallbackBlock)completionBlock
+                   failure:(nullable SFOAuthFlowFailureCallbackBlock)failureBlock;
+
+/**
+ Login using the given JWT token to exchange with the service for credentials.
+ @param jwtToken The JWT token (received out of band) to exchange for credentials.
+ @param completionBlock The block of code to execute when the authentication process successfully completes.
+ @param failureBlock The block of code to execute when the authentication process has a fatal failure.
+ @return YES if this call kicks off the authentication process.  NO if an authentication process has already
+ started, in which case subsequent requests are queued up to have their completion or failure blocks executed
+ in succession.
+ */
+- (BOOL)loginWithJwtToken:(NSString *)jwtToken
+               completion:(nullable SFOAuthFlowSuccessCallbackBlock)completionBlock
+                  failure:(nullable SFOAuthFlowFailureCallbackBlock)failureBlock;
 
 /**
  Forces a logout from the current account, redirecting the user to the login process.
@@ -365,6 +486,11 @@ extern NSString * const kSFAuthenticationManagerFinishedNotification;
  */
 - (void)dismissAuthViewControllerIfPresent;
 
+/** Return SFOAuthCredentials using know oauthClientId,
+    @return Connect App auth credentials
+ */
+-(SFOAuthCredentials *)createOAuthCredentials;
+
 /**
  Clears session cookie data from the cookie store, and sets a new session cookie based on the
  OAuth credentials.
@@ -377,24 +503,6 @@ extern NSString * const kSFAuthenticationManagerFinishedNotification;
  @return YES if the error is due to invalid credentials, NO otherwise.
  */
 + (BOOL)errorIsInvalidAuthCredentials:(NSError *)error;
-
-/**
- Remove any cookies with the given names from the given domains.
- @param cookieNames The names of the cookies to remove.
- @param domainNames The names of the domains where the cookies are set.
- */
-+ (void)removeCookies:(NSArray<NSString*> *)cookieNames fromDomains:(NSArray<NSString*> *)domainNames;
-
-/**
- Remove all cookies from the cookie store.
- */
-+ (void)removeAllCookies;
-
-/**
- Adds the access (session) token cookie to the web view, for authentication.
- @param domain The domain on which to set the cookie.
- */
-+ (void)addSidCookieForDomain:(NSString*)domain;
 
 @end
 

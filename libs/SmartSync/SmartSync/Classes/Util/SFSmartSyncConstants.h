@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -28,6 +28,7 @@ extern NSString * const kEmptyString;
 extern NSString * const kNullString;
 
 extern NSString * const kId;
+extern NSString * const kCreatedId;
 extern NSString * const kName;
 extern NSString * const kType;
 extern NSString * const kAttributes;
@@ -36,9 +37,14 @@ extern NSString * const kRawData;
 extern NSString * const kObjectTypeField;
 extern NSString * const kLastModifiedDate;
 extern NSString * const kResponseRecords;
+extern NSString * const kResponseSearchRecords;
 extern NSString * const kResponseTotalSize;
 extern NSString * const kResponseNextRecordsUrl;
 extern NSString * const kRecentItems;
+extern NSString * const kCompositeResponse;
+extern NSString * const kHttpStatusCode;
+extern NSString * const kReferenceId;
+extern NSString * const kBody;
 
 /**
  * Salesforce object types.

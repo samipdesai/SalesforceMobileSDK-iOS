@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2011-2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2011-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -36,8 +36,8 @@
 #import <SalesforceSDKCore/SFAuthenticationManager.h>
 
 // Fill these in when creating a new Connected Application on Force.com
-static NSString * const RemoteAccessConsumerKey = @"3MVG9Iu66FKeHhINkB1l7xt7kR8czFcCTUhgoA8Ol2Ltf1eYHOU4SqQRSEitYFDUpqRWcoQ2.dBv_a1Dyu5xa";
-static NSString * const OAuthRedirectURI        = @"testsfdc:///mobilesdk/detect/oauth/done";
+static NSString * const RemoteAccessConsumerKey = @"3MVG98dostKihXN53TYStBIiS8NRTXcbDzn9nHPb3piMElfQDD.kTyHeXjKV9JNUbe5sZeSQ4CVY1Onzpq21N";
+static NSString * const OAuthRedirectURI        = @"com.salesforce.mobilesdk.sample.restapiexplorer://oauth/success";
 
 @implementation AppDelegate
 
@@ -47,16 +47,13 @@ static NSString * const OAuthRedirectURI        = @"testsfdc:///mobilesdk/detect
 {
     self = [super init];
     if (self) {
-        #if defined(DEBUG)
-            [SFLogger sharedLogger].logLevel = SFLogLevelDebug;
-        #else
-            [SFLogger sharedLogger].logLevel = SFLogLevelInfo;
-        #endif
+        [SFAuthenticationManager sharedManager].advancedAuthConfiguration = SFOAuthAdvancedAuthConfigurationRequire;
         [SalesforceSDKManager sharedManager].connectedAppId = RemoteAccessConsumerKey;
         [SalesforceSDKManager sharedManager].connectedAppCallbackUri = OAuthRedirectURI;
         [SalesforceSDKManager sharedManager].authScopes = @[ @"web", @"api" ];
-        __weak AppDelegate *weakSelf = self;
+        __weak typeof(self) weakSelf = self;
         [SalesforceSDKManager sharedManager].postLaunchAction = ^(SFSDKLaunchAction launchActionList) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
             //
             // If you wish to register for push notifications, uncomment the line below.  Note that,
             // if you want to receive push notifications from Salesforce, you will also need to
@@ -64,12 +61,13 @@ static NSString * const OAuthRedirectURI        = @"testsfdc:///mobilesdk/detect
             //
             //[[SFPushNotificationManager sharedInstance] registerForRemoteNotifications];
             //
-            [weakSelf log:SFLogLevelInfo format:@"Post-launch: launch actions taken: %@", [SalesforceSDKManager launchActionsStringRepresentation:launchActionList]];
-            [weakSelf setupRootViewController];
+            [[SFSDKLogger sharedDefaultInstance] log:[strongSelf class] level:DDLogLevelInfo format:@"Post-launch: launch actions taken: %@", [SalesforceSDKManager launchActionsStringRepresentation:launchActionList]];
+            [strongSelf setupRootViewController];
         };
         [SalesforceSDKManager sharedManager].launchErrorAction = ^(NSError *error, SFSDKLaunchAction launchActionList) {
-            [weakSelf log:SFLogLevelError format:@"Error during SDK launch: %@", [error localizedDescription]];
-            [weakSelf initializeAppViewState];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            [[SFSDKLogger sharedDefaultInstance] log:[strongSelf class] level:DDLogLevelError format:@"Error during SDK launch: %@", [error localizedDescription]];
+            [strongSelf initializeAppViewState];
             [[SalesforceSDKManager sharedManager] launch];
         };
         [SalesforceSDKManager sharedManager].postLogoutAction = ^{
@@ -123,6 +121,12 @@ static NSString * const OAuthRedirectURI        = @"testsfdc:///mobilesdk/detect
     // Respond to any push notification registration errors here.
 }
 
+- (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options
+{
+    return [[SFAuthenticationManager sharedManager] handleAdvancedAuthenticationResponse:url];
+}
+
+
 #pragma mark - Private methods
 
 - (void)initializeAppViewState
@@ -150,7 +154,7 @@ static NSString * const OAuthRedirectURI        = @"testsfdc:///mobilesdk/detect
 
 - (void)handleSdkManagerLogout
 {
-    [self log:SFLogLevelDebug msg:@"SDK Manager logged out.  Resetting app."];
+    [[SFSDKLogger sharedDefaultInstance] log:[self class] level:DDLogLevelDebug format:@"SDK Manager logged out.  Resetting app."];
     [self resetViewState:^{
         [self initializeAppViewState];
         
@@ -179,7 +183,7 @@ static NSString * const OAuthRedirectURI        = @"testsfdc:///mobilesdk/detect
 
 - (void)handleUserSwitch:(SFUserAccount *)fromUser toUser:(SFUserAccount *)toUser
 {
-    [self log:SFLogLevelInfo format:@"SFUserAccountManager changed from user %@ to %@.  Resetting app.", fromUser.userName, toUser.userName];
+    [[SFSDKLogger sharedDefaultInstance] log:[self class] level:DDLogLevelInfo format:@"SFUserAccountManager changed from user %@ to %@.  Resetting app.", fromUser.userName, toUser.userName];
     [self resetViewState:^{
         [self initializeAppViewState];
         [[SalesforceSDKManager sharedManager] launch];
@@ -192,7 +196,7 @@ static NSString * const OAuthRedirectURI        = @"testsfdc:///mobilesdk/detect
     //collect credentials and copy to pasteboard
     SFOAuthCredentials *creds = [SFUserAccountManager sharedInstance].currentUser.credentials;
     NSMutableDictionary *configDict = [NSMutableDictionary dictionaryWithDictionary:@{@"test_client_id": RemoteAccessConsumerKey,
-                                                                                      @"test_login_domain": [SFUserAccountManager sharedInstance].loginHost,
+                                                                                      @"test_login_domain": [SFAuthenticationManager sharedManager].loginHost,
                                                                                       @"test_redirect_uri": OAuthRedirectURI,
                                                                                       @"refresh_token": creds.refreshToken,
                                                                                       @"instance_url": [creds.instanceUrl absoluteString],

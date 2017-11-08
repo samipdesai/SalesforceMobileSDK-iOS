@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -23,11 +23,15 @@
  */
 
 #include <pthread.h>
+#import <objc/runtime.h>
 
 #import <CocoaLumberjack/CocoaLumberjack.h>
 #import "SFCocoaLumberJackCustomFormatter.h"
 #import "SFLogger.h"
 #import "SFLogger_Internal.h"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 @implementation SFCocoaLumberJackCustomFormatter {
     int loggerCount;
@@ -60,18 +64,11 @@
     NSString *dateAndTime = [threadUnsafeDateFormatter stringFromDate:(logMessage->_timestamp)];
 
     NSString *classString = nil;
-    NSString *selectorString = nil;
-    if ([logMessage->_tag isKindOfClass:[SFLogTag class]]) {
-        SFLogTag *tag = (SFLogTag*)logMessage->_tag;
-        if (tag.originClass) {
-            classString = NSStringFromClass(tag.originClass);
-        }
-
-        if (tag.selector) {
-            selectorString = NSStringFromSelector(tag.selector);
-        }
+    if (logMessage->_tag && class_isMetaClass(object_getClass(logMessage->_tag))) {
+        Class tagClass = (Class)logMessage->_tag;
+        classString = NSStringFromClass(tagClass);
     }
-    
+
     SFLogIdentifier *identifier = nil;
     if (logMessage->_context < _logger->_logIdentifiersByContext.count) {
         identifier = _logger->_logIdentifiersByContext[logMessage->_context];
@@ -90,7 +87,7 @@
                                 identifier.identifier];
     
     NSString *file = ([logMessage->_file isEqualToString:@"(null)"]) ? nil : logMessage->_file;
-    NSString *function = ([logMessage->_function isEqualToString:@"(null)"]) ? selectorString : logMessage->_function;
+    NSString *function = ([logMessage->_function isEqualToString:@"(null)"]) ? nil : logMessage->_function;
     
     if (file && function) {
         [message appendFormat:@" <%@:%ld %@>", [file lastPathComponent], (unsigned long) logMessage->_line, function];
@@ -112,5 +109,7 @@
 - (void)willRemoveFromLogger:(id <DDLogger>)logger {
     loggerCount--;
 }
+
+#pragma clang diagnostic pop
 
 @end

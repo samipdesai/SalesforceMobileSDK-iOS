@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014-2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -26,11 +26,11 @@
 #import "SFSmartSyncMetadataManager.h"
 #import "SFSmartSyncCacheManager.h"
 #import "SFObject.h"
-#import "SFSmartSyncSoqlBuilder.h"
+#import <SalesforceSDKCore/SFSDKSoqlBuilder.h>
 #import <SalesforceSDKCore/SFUserAccountManager.h>
 #import <SalesforceSDKCore/TestSetupUtils.h>
 #import <SalesforceSDKCore/SFJsonUtils.h>
-#import <SalesforceRestAPI/SFRestAPI+Blocks.h>
+#import <SalesforceSDKCore/SFRestAPI+Blocks.h>
 #import <SalesforceSDKCore/SFAuthenticationManager.h>
 
 @interface MetadataManagerTests : XCTestCase
@@ -55,11 +55,11 @@ static NSString* const kCaseOneName = @"00001001";
 + (void)setUp
 {
     @try {
-        [SFLogger sharedLogger].logLevel = SFLogLevelDebug;
+        [SFSDKSmartSyncLogger setLogLevel:DDLogLevelDebug];
         [TestSetupUtils populateAuthCredentialsFromConfigFileForClass:[self class]];
         [TestSetupUtils synchronousAuthRefresh];
     } @catch (NSException *exception) {
-        [self log:SFLogLevelDebug format:@"Populating auth from config failed: %@", exception];
+        [SFSDKSmartSyncLogger d:[self class] format:@"Populating auth from config failed: %@", exception];
         authException = exception;
     }
     [super setUp];
@@ -72,7 +72,6 @@ static NSString* const kCaseOneName = @"00001001";
         XCTFail(@"Setting up authentication failed: %@", authException);
     }
     [SFRestAPI setIsTestRun:YES];
-    [[SFRestAPI sharedInstance] setCoordinator:[SFAuthenticationManager sharedManager].coordinator];
     self.currentUser = [SFUserAccountManager sharedInstance].currentUser;
     [SFSmartSyncCacheManager sharedInstance:self.currentUser];
     self.metadataManager = [SFSmartSyncMetadataManager sharedInstance:self.currentUser];
@@ -104,7 +103,7 @@ static NSString* const kCaseOneName = @"00001001";
     };
     
     SFRestFailBlock failBlock = ^(NSError *error) {
-        [self log:SFLogLevelError format:@"Failed to get query result, error %@", [error localizedDescription]];
+        [SFSDKSmartSyncLogger e:[self class] format:@"Failed to get query result, error %@", [error localizedDescription]];
     };
     
     // Send request.
@@ -114,7 +113,7 @@ static NSString* const kCaseOneName = @"00001001";
 
 - (void)testGlobalMRUObjectsFromServer
 {
-    SFSmartSyncSoqlBuilder *queryBuilder = [[SFSmartSyncSoqlBuilder withFields:@"Id"] from:@"Case"];
+    SFSDKSoqlBuilder *queryBuilder = [[SFSDKSoqlBuilder withFields:@"Id"] from:@"Case"];
     [queryBuilder whereClause:[NSString stringWithFormat:@"CaseNumber = '%@'", kCaseOneName]];
     NSString *queryString = [queryBuilder build];
     [self sendQuery:queryString withCompeletionBlock:^(NSArray *result){
@@ -147,14 +146,14 @@ static NSString* const kCaseOneName = @"00001001";
 - (void)testCommonMRUObjectsFromServer
 {
     //fetch test data
-    SFSmartSyncSoqlBuilder *queryBuilder = [[SFSmartSyncSoqlBuilder withFields:@"Id"] from:@"Account"];
+    SFSDKSoqlBuilder *queryBuilder = [[SFSDKSoqlBuilder withFields:@"Id"] from:@"Account"];
     [queryBuilder whereClause:[NSString stringWithFormat:@"Name = '%@'", kAccountOneName]];
     NSString *queryString = [queryBuilder build];
     [self sendQuery:queryString withCompeletionBlock:^(NSArray *result){
         kAccountOneId = [result[0] valueForKey:@"Id"];
     }];
     
-    queryBuilder = [[SFSmartSyncSoqlBuilder withFields:@"Id"] from:@"Opportunity"];
+    queryBuilder = [[SFSDKSoqlBuilder withFields:@"Id"] from:@"Opportunity"];
     [queryBuilder whereClause:[NSString stringWithFormat:@"Name = '%@'", kOpportunityOneName]];
     queryString = [queryBuilder build];
     [self sendQuery:queryString withCompeletionBlock:^(NSArray *result){

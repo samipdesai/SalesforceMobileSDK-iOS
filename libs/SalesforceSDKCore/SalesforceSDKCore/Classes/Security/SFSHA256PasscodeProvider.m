@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2013, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2013-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -71,12 +71,12 @@ static NSString * const kKeychainIdentifierPasscode = @"com.salesforce.security.
 - (NSString *)generateEncryptionKey:(NSString *)passcode
 {
     if ([self hashedVerificationPasscode] == nil) {
-        [self log:SFLogLevelError msg:@"Verification passcode is not set.  Set the verificationPasscode property before calling this method."];
+        [SFSDKCoreLogger e:[self class] format:@"Verification passcode is not set.  Set the verificationPasscode property before calling this method."];
         return nil;
     }
     
     if (![self verifyPasscode:passcode]) {
-        [self log:SFLogLevelError msg:@"Passcode does not pass verification."];
+        [SFSDKCoreLogger e:[self class] format:@"Passcode does not pass verification."];
         return nil;
     }
     

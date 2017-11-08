@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -278,7 +278,7 @@ static CGFloat      const kUseTouchIdButtonHeight           = 40.0f;
 {
     [super viewDidLoad];
     [self.view setBackgroundColor:[UIColor blackColor]];
-    [self log:SFLogLevelDebug msg:@"SFPasscodeViewController viewDidLoad"];
+    [SFSDKCoreLogger d:[self class] format:@"SFPasscodeViewController viewDidLoad"];
     if ([self respondsToSelector:@selector(setEdgesForExtendedLayout:)]) {
         [self setEdgesForExtendedLayout:UIRectEdgeNone];
     }
@@ -299,7 +299,7 @@ static CGFloat      const kUseTouchIdButtonHeight           = 40.0f;
 
 - (void)forgotPassAction
 {
-    __weak SFPasscodeViewController *weakSelf = self;
+    __weak typeof(self) weakSelf = self;
     
     UIAlertController* alert = [UIAlertController alertControllerWithTitle:[SFSDKResourceUtils localizedString:@"forgotPasscodeTitle"]
                                                                    message:[SFSDKResourceUtils localizedString:@"logoutAlertViewTitle"]
@@ -311,8 +311,9 @@ static CGFloat      const kUseTouchIdButtonHeight           = 40.0f;
                                style:UIAlertActionStyleDefault
                                handler:^(UIAlertAction *action)
                                {
-                                   [weakSelf log:SFLogLevelDebug msg:@"User pressed Yes"];
-                                   [weakSelf validatePasscodeFailed];
+                                   __strong typeof(weakSelf) strongSelf = weakSelf;
+                                   [SFSDKCoreLogger d:[strongSelf class] format:@"User pressed Yes"];
+                                   [strongSelf validatePasscodeFailed];
                                }];
 
     UIAlertAction *cancelAction = [UIAlertAction
@@ -320,13 +321,13 @@ static CGFloat      const kUseTouchIdButtonHeight           = 40.0f;
                                    style:UIAlertActionStyleDefault
                                    handler:^(UIAlertAction *action)
                                    {
-                                       [weakSelf log:SFLogLevelDebug msg:@"User pressed No"];
+                                       [SFSDKCoreLogger d:[weakSelf class] format:@"User pressed No"];
                                    }];
     
     
     [alert addAction:okAction];
     [alert addAction:cancelAction];
-    [self log:SFLogLevelDebug msg:@"SFPasscodeViewController forgotPassAction"];
+    [SFSDKCoreLogger d:[self class] format:@"SFPasscodeViewController forgotPassAction"];
     [self presentViewController:alert animated:YES completion:nil];
 }
 

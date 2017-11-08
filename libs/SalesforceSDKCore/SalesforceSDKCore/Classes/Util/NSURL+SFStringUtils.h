@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  Author: Kevin Hawkins
  
  Redistribution and use of this software in source and binary forms, with or without modification,
@@ -62,5 +62,11 @@ extern NSString * const kSFRedactedQuerystringValue;
  @return an absolute string URL representation
  */
 + (NSString*)stringUrlWithScheme:(NSString*)scheme host:(NSString*)host port:(NSNumber*)port pathComponents:(NSArray*)pathComponents;
+
+/**
+ Adds a trailing slash to the URL's path, if necessary
+ @return A URL whose path ends in a forward slash
+ */
+- (NSURL *)slashTerminatedUrl;
 
 @end

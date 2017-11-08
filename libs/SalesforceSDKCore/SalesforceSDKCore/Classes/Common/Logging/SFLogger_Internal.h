@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2016, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2016-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -25,12 +25,14 @@
 #import <CocoaLumberjack/CocoaLumberjack.h>
 #import <stdatomic.h>
 #import "SFLogStorage.h"
+#import "SFLogger.h"
 
-extern NSString * SFLogNameForFlag(SFLogFlag flag);
-extern NSString * SFLogNameForLogLevel(SFLogLevel level);
+extern NSString * SFLogNameForFlag(SFLogFlag flag) SFSDK_DEPRECATED(5.2, 6.0, "Use SFSDKLogger instead.");
+extern NSString * SFLogNameForLogLevel(SFLogLevel level) SFSDK_DEPRECATED(5.2, 6.0, "Use SFSDKLogger instead.");
 
 @interface DDLog () <SFLogStorage> @end
 
+SFSDK_DEPRECATED(5.2, 6.0, "Use SFSDKLogger instead.")
 @interface SFLogIdentifier : NSObject
 
 @property (nonatomic, weak) SFLogger *logger;
@@ -38,19 +40,10 @@ extern NSString * SFLogNameForLogLevel(SFLogLevel level);
 @property (nonatomic, assign) SFLogLevel logLevel;
 @property (nonatomic, assign, readonly) SFLogFlag logFlag;
 @property (nonatomic, assign) NSInteger context;
+@property (nonatomic, strong, readonly) os_log_t defaultLog;
 
 - (instancetype)initWithIdentifier:(NSString*)identifier NS_DESIGNATED_INITIALIZER;
-
-@end
-
-/////////////////
-
-@interface SFLogTag : NSObject
-
-@property (nonatomic, readonly) SEL selector;
-@property (nonatomic, strong, readonly) Class originClass;
-
-- (instancetype)initWithClass:(Class)originClass selector:(SEL)selector;
+- (os_log_t)logForCategory:(NSString *)category;
 
 @end
 

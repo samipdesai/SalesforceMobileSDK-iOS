@@ -41,46 +41,32 @@ NSString * const kSyncIdArg = @"syncId";
 NSString * const kSyncEventType = @"sync";
 NSString * const kSyncDetail = @"detail";
 NSString * const kSyncIsGlobalStoreArg    = @"isGlobalStore";
+NSString * const kSyncStoreNameArg    = @"storeName";
 
 @interface SFSmartSyncPlugin ()
-
-@property (nonatomic, strong) SFSmartSyncSyncManager *syncManager;
-@property (nonatomic, strong) SFSmartSyncSyncManager *globalSyncManager;
 
 @end
 
 @implementation SFSmartSyncPlugin
 
-- (SFSmartSyncSyncManager *) syncManager
-{
-    return [SFSmartSyncSyncManager sharedInstanceForStore:[SFSmartStore sharedStoreWithName:kDefaultSmartStoreName]];
-}
-
-- (SFSmartSyncSyncManager *) globalSyncManager
-{
-    return [SFSmartSyncSyncManager sharedInstanceForStore:[SFSmartStore sharedGlobalStoreWithName:kDefaultSmartStoreName]];
-}
-
 - (void) resetSyncManager
 {
-    self.syncManager = nil;
-    SFUserAccount* user = [SFUserAccountManager sharedInstance].currentUser;
-    [SFSmartSyncSyncManager removeSharedInstance:user];
-    self.syncManager = [SFSmartSyncSyncManager sharedInstance:user];
+    [SFSmartSyncSyncManager removeSharedInstances];
 }
 
-- (void) handleSyncUpdate:(SFSyncState*)sync isGlobal:(BOOL)isGlobal
+- (void) handleSyncUpdate:(SFSyncState*)sync withArgs:(NSDictionary *)args
 {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSError *error = nil;
         if ([NSJSONSerialization isValidJSONObject:[sync asDict]]) {
             NSMutableDictionary* detailDict = [NSMutableDictionary dictionaryWithDictionary:[sync asDict]];
-            detailDict[kSyncIsGlobalStoreArg] = isGlobal ? @YES : @NO;
+            detailDict[kSyncIsGlobalStoreArg] = [self isGlobal:args]?@YES:@NO;
+            detailDict[kSyncStoreNameArg] = [self storeName:args];
             NSData *detailData = [NSJSONSerialization dataWithJSONObject:detailDict
                                                                  options:0 // non-pretty printing
                                                                    error:&error];
             if (error) {
-                [self log:SFLogLevelError format:@"JSON Parsing Error: %@", error];
+                [SFSDKHybridLogger e:[self class] format:[NSString stringWithFormat:@"JSON Parsing Error: %@", error]];
             } else {
                 NSString* detailAsString = [[NSString alloc] initWithData:detailData encoding:NSUTF8StringEncoding];
                 NSString* js = [
@@ -96,7 +82,7 @@ NSString * const kSyncIsGlobalStoreArg    = @"isGlobalStore";
                 [self.commandDelegate evalJs:js];
             }
         } else {
-            [self log:SFLogLevelDebug format:@"invalid object passed to JSONDataRepresentation???"];
+            [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"Invalid object passed to JSONDataRepresentation???"]];
         }
     });
 }
@@ -105,9 +91,9 @@ NSString * const kSyncIsGlobalStoreArg    = @"isGlobalStore";
 {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (syncStatus == SFSyncStateStatusDone) {
-            [self log:SFLogLevelDebug format:@"cleanResyncGhosts completed successfully"];
+            [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"cleanResyncGhosts completed successfully"]];
         } else {
-            [self log:SFLogLevelError format:@"cleanResyncGhosts did not complete successfully"];
+            [SFSDKHybridLogger e:[self class] format:[NSString stringWithFormat:@"cleanResyncGhosts did not complete successfully"]];
         }
     });
 }
@@ -118,9 +104,8 @@ NSString * const kSyncIsGlobalStoreArg    = @"isGlobalStore";
 {
     [self runCommand:^(NSDictionary* argsDict) {
         NSNumber* syncId = (NSNumber*) [argsDict nonNullObjectForKey:kSyncIdArg];
-        BOOL isGlobal = [self isGlobal:argsDict];
-        [self log:SFLogLevelDebug format:@"getSyncStatus with sync id: %@", syncId];
-        SFSyncState* sync = [[self getSyncManagerInst:isGlobal] getSyncStatus:syncId];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"getSyncStatus with sync id: %@", syncId]];
+        SFSyncState* sync = [[self getSyncManagerInst:argsDict] getSyncStatus:syncId];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[sync asDict]];
     } command:command];
 }
@@ -131,12 +116,11 @@ NSString * const kSyncIsGlobalStoreArg    = @"isGlobalStore";
         NSString *soupName = [argsDict nonNullObjectForKey:kSyncSoupNameArg];
         SFSyncOptions *options = [SFSyncOptions newFromDict:[argsDict nonNullObjectForKey:kSyncOptionsArg]];
         SFSyncDownTarget *target = [SFSyncDownTarget newFromDict:[argsDict nonNullObjectForKey:kSyncTargetArg]];
-        BOOL isGlobal = [self isGlobal:argsDict];
-        __weak SFSmartSyncPlugin *weakSelf = self;
-        SFSyncState* sync = [[self getSyncManagerInst:isGlobal] syncDownWithTarget:target options:options soupName:soupName updateBlock:^(SFSyncState* sync) {
-            [weakSelf handleSyncUpdate:sync isGlobal:isGlobal];
+        __weak typeof(self) weakSelf = self;
+        SFSyncState* sync = [[self getSyncManagerInst:argsDict] syncDownWithTarget:target options:options soupName:soupName updateBlock:^(SFSyncState* sync) {
+            [weakSelf handleSyncUpdate:sync withArgs:argsDict];
         }];
-        [self log:SFLogLevelDebug format:@"syncDown # %ld from soup: %@", sync.syncId, soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"syncDown # %ld from soup: %@", sync.syncId, soupName]];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[sync asDict]];
     } command:command];
 }
@@ -145,11 +129,10 @@ NSString * const kSyncIsGlobalStoreArg    = @"isGlobalStore";
 {
     [self runCommand:^(NSDictionary* argsDict) {
         NSNumber* syncId = (NSNumber*) [argsDict nonNullObjectForKey:kSyncIdArg];
-        BOOL isGlobal = [self isGlobal:argsDict];
-        [self log:SFLogLevelDebug format:@"reSync with sync id: %@", syncId];
-        __weak SFSmartSyncPlugin *weakSelf = self;
-        SFSyncState* sync = [[self getSyncManagerInst:isGlobal] reSync:syncId updateBlock:^(SFSyncState* sync) {
-            [weakSelf handleSyncUpdate:sync isGlobal:isGlobal];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"reSync with sync id: %@", syncId]];
+        __weak typeof(self) weakSelf = self;
+        SFSyncState* sync = [[self getSyncManagerInst:argsDict] reSync:syncId updateBlock:^(SFSyncState* sync) {
+            [weakSelf handleSyncUpdate:sync withArgs:argsDict];
         }];
         if (sync) {
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[sync asDict]];
@@ -163,10 +146,9 @@ NSString * const kSyncIsGlobalStoreArg    = @"isGlobalStore";
 {
     [self runCommand:^(NSDictionary* argsDict) {
         NSNumber* syncId = (NSNumber*) [argsDict nonNullObjectForKey:kSyncIdArg];
-        BOOL isGlobal = [self isGlobal:argsDict];
-        [self log:SFLogLevelDebug format:@"cleanResyncGhosts with sync id: %@", syncId];
-        __weak SFSmartSyncPlugin *weakSelf = self;
-        [[self getSyncManagerInst:isGlobal] cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus) {
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"cleanResyncGhosts with sync id: %@", syncId]];
+        __weak typeof(self) weakSelf = self;
+        [[self getSyncManagerInst:argsDict] cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus) {
             [weakSelf handleGhostSyncUpdate:syncStatus];
         }];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
@@ -179,19 +161,37 @@ NSString * const kSyncIsGlobalStoreArg    = @"isGlobalStore";
         NSString *soupName = [argsDict nonNullObjectForKey:kSyncSoupNameArg];
         SFSyncOptions *options = [SFSyncOptions newFromDict:[argsDict nonNullObjectForKey:kSyncOptionsArg]];
         SFSyncUpTarget *target = [SFSyncUpTarget newFromDict:[argsDict nonNullObjectForKey:kSyncTargetArg]];
-        BOOL isGlobal = [self isGlobal:argsDict];
-        __weak SFSmartSyncPlugin *weakSelf = self;
-        SFSyncState* sync = [[self getSyncManagerInst:isGlobal] syncUpWithTarget:target options:options soupName:soupName updateBlock:^(SFSyncState* sync) {
-            [weakSelf handleSyncUpdate:sync isGlobal:isGlobal];
+        __weak typeof(self) weakSelf = self;
+        SFSyncState* sync = [[self getSyncManagerInst:argsDict] syncUpWithTarget:target options:options soupName:soupName updateBlock:^(SFSyncState* sync) {
+            [weakSelf handleSyncUpdate:sync withArgs:argsDict];
         }];
-        [self log:SFLogLevelDebug format:@"syncUp # %ld from soup: %@", sync.syncId, soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"syncUp # %ld from soup: %@", sync.syncId, soupName]];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[sync asDict]];
     } command:command];
 }
 
-- (SFSmartSyncSyncManager *) getSyncManagerInst:(BOOL)isGlobal
+- (SFSmartStore *)storeWithName:(NSString *)storeName isGlobal:(BOOL) isGlobal
 {
-    return isGlobal ? self.globalSyncManager : self.syncManager;
+    SFSmartStore *store = isGlobal?[SFSmartStore sharedGlobalStoreWithName:storeName]:
+                                   [SFSmartStore sharedStoreWithName:storeName];
+    return store;
+}
+
+- (SFSmartSyncSyncManager *)getSyncManagerInst:(NSDictionary *)args
+{
+    NSString *storeName = [self storeName:args];
+    BOOL isGlobal = [self isGlobal:args];
+    SFSmartStore *storeInst = [self storeWithName:storeName isGlobal:isGlobal];
+    return [SFSmartSyncSyncManager sharedInstanceForStore:storeInst];
+}
+
+- (NSString *)storeName:(NSDictionary *)args
+{
+    NSString *storeName = [args nonNullObjectForKey:kSyncStoreNameArg];
+    if(storeName==nil) {
+        storeName = kDefaultSmartStoreName;
+    }
+    return storeName;
 }
 
 - (BOOL) isGlobal:(NSDictionary *)args

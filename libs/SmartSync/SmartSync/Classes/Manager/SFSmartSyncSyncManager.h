@@ -22,26 +22,13 @@
  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import <SalesforceRestAPI/SFRestAPI+Blocks.h>
+#import <SalesforceSDKCore/SFRestAPI+Blocks.h>
 #import "SFSyncState.h"
 #import "SFSyncOptions.h"
 #import "SFSyncUpTarget.h"
 #import "SFSyncDownTarget.h"
 
 @class SFUserAccount;
-
-extern NSString * const kSyncManagerTargetQueryType;
-extern NSString * const kSyncManagerTargetQuery;
-extern NSString * const kSyncManagerTargetObjectType;
-extern NSString * const kSyncManagerTargetFieldlist;
-extern NSString * const kSyncManagerQueryTypeMru;
-extern NSString * const kSyncManagerQueryTypeSoql;
-extern NSString * const kSyncManagerQueryTypeSosl;
-
-extern NSString * const kSyncManagerLocal;
-extern NSString * const kSyncManagerLocallyCreated;
-extern NSString * const kSyncManagerLocallyUpdated;
-extern NSString * const kSyncManagerLocallyDeleted;
 
 // block type
 typedef void (^SFSyncSyncManagerUpdateBlock) (SFSyncState* sync);
@@ -51,6 +38,8 @@ typedef void (^SFSyncSyncManagerCompletionStatusBlock) (SFSyncStateStatus syncSt
  * This class provides methods for doing synching records to/from the server from/to the smartstore.
  */
 @interface SFSmartSyncSyncManager : NSObject
+
+@property (nonatomic, strong, readonly) SFSmartStore *store;
 
 /**
  * Singleton method for accessing sync manager instance by user. Configured SmartStore store will be
@@ -97,6 +86,11 @@ typedef void (^SFSyncSyncManagerCompletionStatusBlock) (SFSyncStateStatus syncSt
  * @param store The store instance.
  */
 + (void)removeSharedInstanceForStore:(SFSmartStore*)store;
+
+/**
+ * Removes all shared instances
+ */
++ (void)removeSharedInstances;
 
 /**
  * Returns details about a sync.
@@ -152,13 +146,5 @@ typedef void (^SFSyncSyncManagerCompletionStatusBlock) (SFSyncStateStatus syncSt
  * @param completionStatusBlock Completion status block.
  */
 - (void) cleanResyncGhosts:(NSNumber*)syncId completionStatusBlock:(SFSyncSyncManagerCompletionStatusBlock)completionStatusBlock;
-
-/**
- * Returns IDs (specified ID field) from dirty records in the given soup.
- *
- * @param soupName The name of the soup to look into.
- * @param idField The field to return.
- */
-- (NSOrderedSet*) getDirtyRecordIds:(NSString*)soupName idField:(NSString*)idField;
 
 @end

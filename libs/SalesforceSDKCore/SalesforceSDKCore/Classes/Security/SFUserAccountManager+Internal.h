@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -26,27 +26,16 @@
 
 @interface SFUserAccountManager ()
 {
-    dispatch_queue_t _syncQueue;
+    NSRecursiveLock *_accountsLock;
 }
 
 @property (nonatomic, strong, nonnull) NSHashTable<id<SFUserAccountManagerDelegate>> *delegates;
-@property (nonatomic, strong, nonnull) SFUserAccountIdentity *anonymousUserIdentity;
-@property (nonatomic, strong, readwrite, nullable) SFUserAccount *anonymousUser;
 
 /** A map of user accounts by user ID
  */
 @property (nonatomic, strong, nonnull) NSMutableDictionary *userAccountMap;
 
-@property (nonatomic, strong, nullable) NSString *lastChangedOrgId;
-@property (nonatomic, strong, nullable) NSString *lastChangedUserId;
-@property (nonatomic, strong, nullable) NSString *lastChangedCommunityId;
-
-/** Returns YES if the specified user is anonymous.
- Note: an anonymous user is a user that doesn't require
- credentials towards a server.
- */
-+ (BOOL)isUserAnonymous:(nullable SFUserAccount*)user;
-
+@property (nonatomic, strong, nullable) id<SFUserAccountPersister> accountPersister;
 /**
  Executes the given block for each configured delegate.
  @param block The block to execute for each delegate.
@@ -54,21 +43,26 @@
 - (void)enumerateDelegates:(nullable void (^)(id<SFUserAccountManagerDelegate> _Nonnull))block;
 
 /**
- Creates a user account staged with the given auth credentials.
- @param credentials The OAuth credentials to apply to the user account.
- @return The new user account with the given credentials.
+ *
+ * @return NSSet enumeration of all account Names
  */
-- (nonnull SFUserAccount *)createUserAccountWithCredentials:(nonnull SFOAuthCredentials *)credentials;
+- (nullable NSSet *)allExistingAccountNames;
 
-/** Setup the anonymous user according
- to the existing settings.
- Note: method exposed only to unit tests
+/** Returns a unique identifier that can be used to create a new Account
+ *
+ * @param clientId OAuth Client Id
+ * @return A unique identifier
  */
-- (void)setupAnonymousUser:(BOOL)supportsAnonymousUser autocreateAnonymousUser:(BOOL)autocreateAnonymousUser;
+- (nonnull NSString *)uniqueUserAccountIdentifier:(nonnull NSString *)clientId;
 
-/** Delete and disable the anonymous user
- Note: method exposed only to unit tests
+/** Reload the accounts and reset the state of SFUserAccountManager. Use for tests only
+ *
  */
-- (void)disableAnonymousAccount;
+- (void)reload;
+
+/** Get the Account Persister being used.
+ * @return SFUserAccountPersister that is used.
+ */
+- (nullable id<SFUserAccountPersister>)accountPersister;
 
 @end

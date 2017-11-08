@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -28,6 +28,8 @@
 #import <Cordova/CDVViewController.h>
 #import "CDVPlugin+SFAdditions.h"
 #import <Cordova/CDVInvokedUrlCommand.h>
+#import <SalesforceSDKCore/SFSDKAppFeatureMarkers.h>
+#import <SalesforceSDKCore/NSDictionary+SFAdditions.h>
 
 // Keys in sdk info map
 NSString * const kSDKVersionKey = @"sdkVersion";
@@ -38,6 +40,8 @@ NSString * const kBootConfigKey = @"bootConfig";
 
 // Other constants
 NSString * const kForcePluginPrefix = @"com.salesforce.";
+
+static NSString * const kAppFeatureKey   = @"feature";
 
 @interface SFSDKInfoPlugin ()
 
@@ -75,15 +79,13 @@ NSString * const kForcePluginPrefix = @"com.salesforce.";
         NSDictionary *pluginsMap = vc.pluginsMap;
         for (__strong NSString *key in [pluginsMap allKeys]) {
             key = [key lowercaseString];
-            [self log:SFLogLevelDebug format:@"key=%@", key];
+            [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"key=%@", key]];
             if ([key hasPrefix:kForcePluginPrefix]) {
                 [services addObject:key];
             }
         }
     } else {
-        [self log:SFLogLevelError
-           format:@"??? Expected CDVViewController class for plugin's view controller. Got '%@'.",
-         NSStringFromClass([self.viewController class])];
+        [SFSDKHybridLogger e:[self class] format:[NSString stringWithFormat:@"??? Expected CDVViewController class for plugin's view controller. Got '%@'.", NSStringFromClass([self.viewController class])]];
     }
     return services;
 }
@@ -107,6 +109,27 @@ NSString * const kForcePluginPrefix = @"com.salesforce.";
     [self writeSuccessDictToJsRealm:sdkInfo callbackId:callbackId];
 }
 
+- (void)registerAppFeature:(CDVInvokedUrlCommand *)command
+{
+    [self getVersion:@"registerAppFeature" withArguments:command.arguments];
+    NSDictionary *argsDict = [self getArgument:command.arguments atIndex:0];
+    if(argsDict != nil){
+        NSString *appFeatureCode = [argsDict nonNullObjectForKey:kAppFeatureKey];
+        if(appFeatureCode != nil){
+            [SFSDKAppFeatureMarkers registerAppFeature:appFeatureCode];
+        }
+    }
+}
 
-
+- (void)unregisterAppFeature:(CDVInvokedUrlCommand *)command
+{
+    [self getVersion:@"unregisterAppFeature" withArguments:command.arguments];
+    NSDictionary *argsDict = [self getArgument:command.arguments atIndex:0];
+    if(argsDict != nil){
+        NSString *appFeatureCode = [argsDict nonNullObjectForKey:kAppFeatureKey];
+        if(appFeatureCode != nil){
+            [SFSDKAppFeatureMarkers unregisterAppFeature:appFeatureCode];
+        }
+    }
+}
 @end

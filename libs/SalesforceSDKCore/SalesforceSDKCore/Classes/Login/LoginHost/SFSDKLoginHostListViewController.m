@@ -3,7 +3,7 @@
  SalesforceSDKCore
  
  Created by Kunal Chitalia on 1/22/16.
- Copyright (c) 2016, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2016-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -33,6 +33,7 @@
 #import "SFAuthenticationManager.h"
 #import "SFSDKResourceUtils.h"
 #import "SFLoginViewController.h"
+#import "SFManagedPreferences.h"
 
 static NSString * const SFDCLoginHostListCellIdentifier = @"SFDCLoginHostListCellIdentifier";
 
@@ -47,13 +48,10 @@ static NSString * const SFDCLoginHostListCellIdentifier = @"SFDCLoginHostListCel
  */
 - (void)applyLoginHostAtIndex:(NSUInteger)index {
     SFSDKLoginHost *loginHost = [[SFSDKLoginHostStorage sharedInstance] loginHostAtIndex:index];
-    SFUserAccountManager *m = [SFUserAccountManager sharedInstance];
-    
-    // Change the login host and login again. Don't do any logout as we don't
-    // want to remove anything at this point.
-    m.loginHost = loginHost.host;
-    [[SFAuthenticationManager sharedManager] cancelAuthentication];
-    [[SFUserAccountManager sharedInstance] switchToNewUser];}
+    if ([self.delegate respondsToSelector:@selector(hostListViewController:didChangeLoginHost:)]) {
+        [self.delegate hostListViewController:self didChangeLoginHost:loginHost];
+    }
+}
 
 /**
  * Scroll the table to make sure the host at the specified index is visible.
@@ -68,7 +66,7 @@ static NSString * const SFDCLoginHostListCellIdentifier = @"SFDCLoginHostListCel
  * Returns the index of the current login host.
  */
 - (NSUInteger)indexOfCurrentLoginHost {
-    SFUserAccountManager *m = [SFUserAccountManager sharedInstance];
+    SFAuthenticationManager *m = [SFAuthenticationManager sharedManager];
     NSString *currentLoginHost = [m loginHost];
     NSUInteger numberOfLoginHosts = [[SFSDKLoginHostStorage sharedInstance] numberOfLoginHosts];
     for (NSUInteger index = 0; index < numberOfLoginHosts; index++) {
@@ -134,7 +132,7 @@ static NSString * const SFDCLoginHostListCellIdentifier = @"SFDCLoginHostListCel
     SFManagedPreferences *managedPreferences = [SFManagedPreferences sharedPreferences];
     if (!(managedPreferences.hasManagedPreferences && managedPreferences.onlyShowAuthorizedHosts)) {
         self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(showAddLoginHost:)];
-        [self.navigationItem.rightBarButtonItem setTintColor:[UIColor whiteColor]];
+        [self.navigationItem.rightBarButtonItem setTintColor:[SFLoginViewController sharedInstance].navBarTextColor];
     }
     self.title = [SFSDKResourceUtils localizedString:@"LOGIN_CHOOSE_SERVER"];
     self.navigationItem.backBarButtonItem = [[UIBarButtonItem alloc]
@@ -150,6 +148,8 @@ static NSString * const SFDCLoginHostListCellIdentifier = @"SFDCLoginHostListCel
         index = 0; // revert to standard in case there is no current login host
         [self applyLoginHostAtIndex:index];
     }
+    
+    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:SFDCLoginHostListCellIdentifier];
 
     // Refresh the UI and make sure the size is correct.
     [self.tableView reloadData];
@@ -157,12 +157,6 @@ static NSString * const SFDCLoginHostListCellIdentifier = @"SFDCLoginHostListCel
     [self resizeContentForPopover];
     [super viewDidLoad];
     [self setEdgesForExtendedLayout:UIRectEdgeNone];
-    
-    // TODO: Remove the check once we move to iOS 9 as minimum.
-    if ([self.tableView respondsToSelector:@selector(setCellLayoutMarginsFollowReadableWidth:)]) {
-        self.tableView.cellLayoutMarginsFollowReadableWidth = NO;
-    }
-    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:SFDCLoginHostListCellIdentifier];
 }
 
 - (void)viewWillAppear:(BOOL)animated {

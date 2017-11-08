@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -31,16 +31,15 @@
 {
     NSDate *startTime = [NSDate date];
     NSString* callbackId = command.callbackId;
-    /* NSString* jsVersionStr = */[self getVersion:command.methodName withArguments:command.arguments];
+    [self getVersion:command.methodName withArguments:command.arguments];
     NSDictionary *argsDict = [self getArgument:command.arguments atIndex:0];
-    
-    [self log:SFLogLevelDebug format:@"%@ called.", command.methodName];
- 
-    __weak SFForcePlugin* weakSelf = self;
+    [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"%@ called.", command.methodName]];
+    __weak typeof(self) weakSelf = self;
     [self.commandDelegate runInBackground:^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
         CDVPluginResult* result = block(argsDict);
-        [weakSelf log:SFLogLevelDebug format:@"%@ returning after %f secs.", command.methodName, -[startTime timeIntervalSinceNow]];
-        [weakSelf.commandDelegate sendPluginResult:result callbackId:callbackId];
+        [SFSDKHybridLogger d:[strongSelf class] format:[NSString stringWithFormat:@"%@ returning after %f secs.", command.methodName, -[startTime timeIntervalSinceNow]]];
+        [strongSelf.commandDelegate sendPluginResult:result callbackId:callbackId];
     }];
 }
 

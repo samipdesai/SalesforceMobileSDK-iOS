@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -27,12 +27,13 @@
 #import "NSString+SFAdditions.h"
 #import "NSData+SFAdditions.h"
 #import "SFKeychainItemWrapper.h"
-#import "SFLogger.h"
+#import <SalesforceAnalytics/NSUserDefaults+SFAdditions.h>
 
 static NSString * const kKeychainIdentifierPasscode = @"com.salesforce.security.passcode";
 static NSString * const kKeychainIdentifierIV = @"com.salesforce.security.IV";
 
 NSString * const kKeychainIdentifierBaseAppId = @"com.salesforce.security.baseappid";
+static NSString * const kKeychainIdentifierSimulatorBaseAppId = @"com.salesforce.security.baseappid.sim";
 
 @implementation SFCrypto
 
@@ -60,7 +61,7 @@ NSString * const kKeychainIdentifierBaseAppId = @"com.salesforce.security.baseap
                                                       [iv bytes],
                                                       &_cryptor);
         if (cryptStatus != kCCSuccess) {
-            [self log:SFLogLevelError format:@"cryptor creation failure (%d)", cryptStatus];
+            [SFSDKCoreLogger e:[self class] format:@"cryptor creation failure (%d)", cryptStatus];
             return nil;
         }
         
@@ -134,12 +135,12 @@ NSString * const kKeychainIdentifierBaseAppId = @"com.salesforce.security.baseap
 }
 
 + (BOOL)baseAppIdentifierIsConfigured {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:kKeychainIdentifierBaseAppId];
+    return [[NSUserDefaults msdkUserDefaults] boolForKey:kKeychainIdentifierBaseAppId];
 }
 
 + (void)setBaseAppIdentifierIsConfigured:(BOOL)isConfigured {
-    [[NSUserDefaults standardUserDefaults] setBool:isConfigured forKey:kKeychainIdentifierBaseAppId];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+    [[NSUserDefaults msdkUserDefaults] setBool:isConfigured forKey:kKeychainIdentifierBaseAppId];
+    [[NSUserDefaults msdkUserDefaults] synchronize];
 }
 
 static BOOL sBaseAppIdConfiguredThisLaunch = NO;
@@ -151,18 +152,53 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
 }
 
 + (NSString *)baseAppIdentifier {
+#if TARGET_IPHONE_SIMULATOR
+    return [self simulatorBaseAppIdentifier];
+#else
+    return [self deviceBaseAppIdentifier];
+#endif
+}
+
++ (BOOL)setBaseAppIdentifier:(NSString *)appId {
+#if TARGET_IPHONE_SIMULATOR
+    return [self setSimulatorBaseAppIdentifier:appId];
+#else
+    return [self setDeviceBaseAppIdentifier:appId];
+#endif
+}
+
++ (NSString *)simulatorBaseAppIdentifier {
+    NSString *baseAppId = nil;
+    BOOL hasBaseAppId = [self baseAppIdentifierIsConfigured];
+    if (!hasBaseAppId) {
+        baseAppId = [[NSUUID UUID] UUIDString];
+        [self setSimulatorBaseAppIdentifier:baseAppId];
+        [self setBaseAppIdentifierIsConfigured:YES];
+        [self setBaseAppIdentifierConfiguredThisLaunch:YES];
+    } else {
+        baseAppId = [[NSUserDefaults standardUserDefaults] objectForKey:kKeychainIdentifierSimulatorBaseAppId];
+    }
+    return baseAppId;
+}
+
++ (BOOL)setSimulatorBaseAppIdentifier:(NSString *)appId {
+    [[NSUserDefaults standardUserDefaults] setObject:appId forKey:kKeychainIdentifierSimulatorBaseAppId];
+    return [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
++ (NSString *)deviceBaseAppIdentifier {
     static NSString *baseAppId = nil;
     
     @synchronized (self) {
         BOOL hasBaseAppId = [self baseAppIdentifierIsConfigured];
         if (!hasBaseAppId) {
             // Value hasn't yet been (successfully) persisted to the keychain.
-            [SFLogger log:self level:SFLogLevelInfo msg:@"Base app identifier not configured.  Creating a new value."];
+            [SFSDKCoreLogger i:[self class] format:@"Base app identifier not configured.  Creating a new value."];
             if (baseAppId == nil)
                 baseAppId = [[NSUUID UUID] UUIDString];
-            BOOL creationSuccess = [self setBaseAppIdentifier:baseAppId];
+            BOOL creationSuccess = [self setDeviceBaseAppIdentifier:baseAppId];
             if (!creationSuccess) {
-                [SFLogger log:self level:SFLogLevelError msg:@"Could not persist the base app identifier.  Returning in-memory value."];
+                [SFSDKCoreLogger e:[self class] format:@"Could not persist the base app identifier.  Returning in-memory value."];
             } else {
                 [self setBaseAppIdentifierIsConfigured:YES];
                 [self setBaseAppIdentifierConfiguredThisLaunch:YES];
@@ -174,14 +210,14 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
             NSString *keychainAppId = [[NSString alloc] initWithData:keychainAppIdData encoding:NSUTF8StringEncoding];
             if (keychainAppIdData == nil || keychainAppId == nil) {
                 // Something went wrong either storing or retrieving the value from the keychain.  Try to rewrite the value.
-                [SFLogger log:self level:SFLogLevelError msg:@"App id keychain data missing or corrupted.  Attempting to reset."];
+                [SFSDKCoreLogger e:[self class] format:@"App id keychain data missing or corrupted.  Attempting to reset."];
                 [self setBaseAppIdentifierIsConfigured:NO];
                 [self setBaseAppIdentifierConfiguredThisLaunch:NO];
                 if (baseAppId == nil)
                     baseAppId = [[NSUUID UUID] UUIDString];
-                BOOL creationSuccess = [self setBaseAppIdentifier:baseAppId];
+                BOOL creationSuccess = [self setDeviceBaseAppIdentifier:baseAppId];
                 if (!creationSuccess) {
-                    [SFLogger log:self level:SFLogLevelError msg:@"Could not persist the base app identifier.  Returning in-memory value."];
+                    [SFSDKCoreLogger e:[self class] format:@"Could not persist the base app identifier.  Returning in-memory value."];
                 } else {
                     [self setBaseAppIdentifierIsConfigured:YES];
                     [self setBaseAppIdentifierConfiguredThisLaunch:YES];
@@ -196,11 +232,11 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
     }
 }
 
-+ (BOOL)setBaseAppIdentifier:(NSString *)appId {
++ (BOOL)setDeviceBaseAppIdentifier:(NSString *)appId {
     static NSUInteger maxRetries = 3;
     
     // Store the app ID value in the keychain.
-    [SFLogger log:self level:SFLogLevelInfo msg:@"Saving the new base app identifier to the keychain."];
+    [SFSDKCoreLogger i:[self class] format:@"Saving the new base app identifier to the keychain."];
     SFKeychainItemWrapper *baseAppIdKeychainWrapper = [SFKeychainItemWrapper itemWithIdentifier:kKeychainIdentifierBaseAppId account:nil];
     NSUInteger currentRetries = 0;
     OSStatus keychainResult = -1;
@@ -208,20 +244,16 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
     while (currentRetries < maxRetries && keychainResult != noErr) {
         keychainResult = [baseAppIdKeychainWrapper setValueData:appIdData];
         if (keychainResult != noErr) {
-            [SFLogger log:self
-                    level:SFLogLevelWarning
-                   format:@"Could not save the base app identifier to the keychain (result: %@).  Retrying.", [SFKeychainItemWrapper keychainErrorCodeString:keychainResult]];
+            [SFSDKCoreLogger w:[self class] format:@"Could not save the base app identifier to the keychain (result: %@).  Retrying.", [SFKeychainItemWrapper keychainErrorCodeString:keychainResult]];
         }
         currentRetries++;
     }
     if (keychainResult != noErr) {
-        [SFLogger log:self
-                level:SFLogLevelError
-               format:@"Giving up on saving the base app identifier to the keychain (result: %@).", [SFKeychainItemWrapper keychainErrorCodeString:keychainResult]];
+        [SFSDKCoreLogger e:[self class] format:@"Giving up on saving the base app identifier to the keychain (result: %@).", [SFKeychainItemWrapper keychainErrorCodeString:keychainResult]];
         return NO;
     }
     
-    [SFLogger log:self level:SFLogLevelInfo msg:@"Successfully created a new base app identifier and stored it in the keychain."];
+    [SFSDKCoreLogger i:[self class] format:@"Successfully created a new base app identifier and stored it in the keychain."];
     return YES;
 }
 
@@ -235,7 +267,7 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
         if (status == kCCSuccess) {
             [self appendToBuffer:[NSData dataWithBytesNoCopy:outBuffer length:dataOutMoved freeWhenDone:NO]]; // we free outBuffer explicity below
         } else {
-            [self log:SFLogLevelError format:@"cryptor update failure (%d) - no data written", status];
+            [SFSDKCoreLogger e:[self class] format:@"cryptor update failure (%d) - no data written", status];
         }
         free(outBuffer); outBuffer = NULL;
     }
@@ -250,7 +282,7 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
     if (kCCSuccess == status) {
         [self appendToBuffer:[NSData dataWithBytesNoCopy:outBuffer length:dataOutMoved freeWhenDone:NO]]; // we free outBuffer explicity below
     } else {
-        [self log:SFLogLevelError format:@"cryptor finalization failure (%d) - final data not written", status];
+        [SFSDKCoreLogger e:[self class] format:@"cryptor finalization failure (%d) - final data not written", status];
     }
     
     free(outBuffer); outBuffer = NULL;
@@ -268,7 +300,7 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
     } else { // CHCryptoModeDisk
         NSInteger result = [self.outputStream write:[data bytes] maxLength:[data length]];
         if (!result) {
-            [self log:SFLogLevelError format:@"failed to write crypted data to output stream (%d)", result];
+            [SFSDKCoreLogger e:[self class] format:@"failed to write crypted data to output stream (%d)", result];
         }
     }
 }
@@ -296,13 +328,13 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
 -(BOOL) decrypt:(NSString *)inputFile to:(NSString *)outputFile {
     FILE *source = fopen([inputFile UTF8String], "rb");
     if (!source) {
-        [self log:SFLogLevelError format:@"failed to read input file"];
+        [SFSDKCoreLogger e:[self class] format:@"failed to read input file"];
         return NO;
     }
     
     FILE *destination = fopen([outputFile UTF8String], "wb");
     if (!destination) {
-        [self log:SFLogLevelError format:@"failed to write output file"];
+        [SFSDKCoreLogger e:[self class] format:@"failed to write output file"];
         fclose(source);
         return NO;
     }
@@ -322,7 +354,7 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
         if (status == kCCSuccess) {
             fwrite(outBuffer, 1, bytesToWrite, destination);
         } else {
-            [self log:SFLogLevelError format:@"decrypt failure (%d) - no data written", status];
+            [SFSDKCoreLogger e:[self class] format:@"decrypt failure (%d) - no data written", status];
             break;
         }
         memset(outBuffer, 0, decryptBufferSize);
@@ -337,7 +369,7 @@ static BOOL sBaseAppIdConfiguredThisLaunch = NO;
         if (kCCSuccess == status) {
             fwrite(outBuffer, 1, bytesToWrite, destination);
         } else {
-            [self log:SFLogLevelError format:@"decrypt finalization failure (%d) - final data not written", status];
+            [SFSDKCoreLogger e:[self class] format:@"decrypt finalization failure (%d) - final data not written", status];
         }
     }
     

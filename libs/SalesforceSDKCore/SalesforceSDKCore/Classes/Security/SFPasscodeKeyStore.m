@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -107,7 +107,7 @@ static NSString * const kPasscodeKeyStoreEncryptionKeyDataArchiveKey = @"com.sal
         // Update the key store dictionary as part of the key update process.
         NSDictionary *origKeyStoreDict = [self keyStoreDictionaryWithKey:_keyStoreKey.encryptionKey];  // Old key.
         if (origKeyStoreDict == nil) {
-            [self log:SFLogLevelError msg:kKeyStoreDecryptionFailedMessage];
+            [SFSDKCoreLogger e:[self class] format:kKeyStoreDecryptionFailedMessage];
             [self setKeyStoreDictionary:nil withKey:keyStoreKey.encryptionKey];
         } else {
             [self setKeyStoreDictionary:origKeyStoreDict withKey:keyStoreKey.encryptionKey];
@@ -119,7 +119,7 @@ static NSString * const kPasscodeKeyStoreEncryptionKeyDataArchiveKey = @"com.sal
         if (keyStoreKey == nil) {
             BOOL resetItemResult = [keychainItem resetKeychainItem];
             if (!resetItemResult) {
-                [self log:SFLogLevelError msg:@"Error removing key store key from the keychain."];
+                [SFSDKCoreLogger e:[self class] format:@"Error removing key store key from the keychain."];
             }
         } else {
             NSData *encryptionKeyData = keyStoreKey.encryptionKey.key;
@@ -131,7 +131,7 @@ static NSString * const kPasscodeKeyStoreEncryptionKeyDataArchiveKey = @"com.sal
             
             OSStatus saveKeyResult = [keychainItem setValueData:keyStoreKeyData];
             if (saveKeyResult != noErr) {
-                [self log:SFLogLevelError msg:@"Error saving key store key to the keychain."];
+                [SFSDKCoreLogger e:[self class] format:@"Error saving key store key to the keychain."];
             }
             keyStoreKey.encryptionKey.key = encryptionKeyData;
         }

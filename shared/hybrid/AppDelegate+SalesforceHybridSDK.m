@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2014-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -23,7 +23,6 @@
  */
 
 #import <objc/runtime.h>
-
 #import "AppDelegate+SalesforceHybridSDK.h"
 #import "UIApplication+SalesforceHybridSDK.h"
 #import "InitialViewController.h"
@@ -33,7 +32,7 @@
 #import <SalesforceSDKCore/SFPushNotificationManager.h>
 #import <SalesforceSDKCore/SFSDKAppConfig.h>
 #import <SalesforceSDKCore/SFDefaultUserManagementViewController.h>
-#import <SalesforceSDKCore/SFLogger.h>
+#import <SalesforceAnalytics/SFSDKLogger.h>
 #import <SmartStore/SalesforceSDKManagerWithSmartStore.h>
 
 @implementation AppDelegate (SalesforceHybridSDK)
@@ -49,24 +48,30 @@
 
 - (AppDelegate *)sfsdk_swizzled_init
 {
-#if defined(DEBUG)
-    [SFLogger sharedLogger].logLevel = SFLogLevelDebug;
-#else
-    [SFLogger sharedLogger].logLevel  = SFLogLevelInfo;
-#endif
-    
     SFHybridViewConfig *appConfig = [SFHybridViewConfig fromDefaultConfigFile];
     // Need to use SalesforceSDKManagerWithSmartStore when using smartstore
     [SalesforceSDKManager setInstanceClass:[SalesforceSDKManagerWithSmartStore class]];
     [SalesforceSDKManager sharedManager].appConfig = appConfig;
-    __weak AppDelegate *weakSelf = self;
+    
+    //Uncomment the following line inorder to enable/force the use of advanced authentication flow.
+    //[SFAuthenticationManager sharedManager].advancedAuthConfiguration = SFOAuthAdvancedAuthConfigurationRequire;
+    // OR
+    // To  retrieve advanced auth configuration from the org, to determine whether to initiate advanced authentication.
+    //[SFAuthenticationManager sharedManager].advancedAuthConfiguration = SFOAuthAdvancedAuthConfigurationAllow;
+    
+    // NOTE: If advanced authentication is configured or forced,  it will launch Safari to handle authentication
+    // instead of a webview. You must implement application:openURL:options: to handle the callback.
+    
+    __weak __typeof(self) weakSelf = self;
     [SalesforceSDKManager sharedManager].postLaunchAction = ^(SFSDKLaunchAction launchActionList) {
-        [weakSelf log:SFLogLevelInfo format:@"Post-launch: launch actions taken: %@", [SalesforceSDKManager launchActionsStringRepresentation:launchActionList]];
-        [weakSelf setupRootViewController];
+        __strong __typeof(weakSelf) strongSelf = weakSelf;
+        [[SFSDKLogger sharedDefaultInstance] log:[self class] level:DDLogLevelInfo format:@"Post-launch: launch actions taken: %@", [SalesforceSDKManager launchActionsStringRepresentation:launchActionList]];
+        [strongSelf setupRootViewController];
     };
     [SalesforceSDKManager sharedManager].launchErrorAction = ^(NSError *error, SFSDKLaunchAction launchActionList) {
-        [weakSelf log:SFLogLevelError format:@"Error during SDK launch: %@", [error localizedDescription]];
-        [weakSelf initializeAppViewState];
+        __strong __typeof(weakSelf) strongSelf = weakSelf;
+        [[SFSDKLogger sharedDefaultInstance] log:[self class] level:DDLogLevelError format:@"Error during SDK launch: %@", [error localizedDescription]];
+        [strongSelf initializeAppViewState];
         [[SalesforceSDKManager sharedManager] launch];
     };
     [SalesforceSDKManager sharedManager].postLogoutAction = ^{
@@ -93,7 +98,9 @@
     
     [self initializeAppViewState];
     [[SalesforceSDKManager sharedManager] launch];
-    return YES;
+    return YES; // we don't want to run's Cordova didFinishLaunchingWithOptions - it creates another window with a webview
+                // if devs want to customize their AppDelegate.m, then they should get rid of AppDelegate+SalesforceHybrid.m
+                // and bring all of its code in their AppDelegate.m
 }
 
 - (void)sfsdk_swizzled_application:(UIApplication *)application didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken
@@ -106,11 +113,21 @@
     [self sfsdk_swizzled_application:application didRegisterForRemoteNotificationsWithDeviceToken:deviceToken];
 }
 
+- (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options{
+
+    // If you're using advanced authentication:
+    // --Configure your app to handle incoming requests to your
+    //   OAuth Redirect URI custom URL scheme.
+    // --Uncomment the following line and delete the original return statement:
+
+    // return [[SFAuthenticationManager sharedManager] handleAdvancedAuthenticationResponse:url];
+    return NO;
+}
 
 - (void)handleSdkManagerLogout
 {
     [self resetViewState:^{
-        [self log:SFLogLevelDebug msg:@"Logout notification received.  Resetting app."];
+        [[SFSDKLogger sharedDefaultInstance] log:[self class] level:DDLogLevelDebug format:@"Logout notification received. Resetting app."];
         ((SFHybridViewController*)self.viewController).appHomeUrl = nil;
         [self initializeAppViewState];
         
@@ -141,7 +158,7 @@
                   toUser:(SFUserAccount *)toUser
 {
     [self resetViewState:^{
-        [self log:SFLogLevelDebug format:@"SFUserAccountManager changed from user %@ to %@.  Resetting app.",
+        [[SFSDKLogger sharedDefaultInstance] log:[self class] level:DDLogLevelDebug format:@"SFUserAccountManager changed from user %@ to %@. Resetting app.",
          fromUser.userName, toUser.userName];
         [self initializeAppViewState];
         [[SalesforceSDKManager sharedManager] launch];

@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2013, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2013-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -32,7 +32,9 @@
 
 @end
 
-@implementation SFRootViewManager
+@implementation SFRootViewManager {
+    UIViewController *_modalViewController;
+}
 
 @synthesize mainWindow = _mainWindow;
 
@@ -62,7 +64,7 @@
         // Try to set a sane value for mainWindow, if it hasn't been set already.
         _mainWindow = [SFApplicationHelper sharedApplication].windows[0];
         if (_mainWindow == nil) {
-            [self log:SFLogLevelError format:@"UIApplication has no defined windows."];
+            [SFSDKCoreLogger e:[self class] format:@"UIApplication has no defined windows."];
         }
     }
     return _mainWindow;
@@ -78,7 +80,7 @@
 - (void)removeDelegate:(id<SFRootViewManagerDelegate>)delegate
 {
     @synchronized (self) {
-        [_delegates removeObject:[NSValue valueWithNonretainedObject:delegate]];        
+        [_delegates removeObject:[NSValue valueWithNonretainedObject:delegate]];
     }
 }
 
@@ -102,76 +104,72 @@
 // Whatever the implementation, it promises to be complex.  As of iOS 6.1, Apple simply does not make
 // the presentation of an "uber" view easy to implement on the edges.
 //
-
-- (void)pushViewController:(UIViewController *)viewController
-{
-    __weak SFRootViewManager *weakSelf = self;
-    void (^pushControllerBlock)(void) = ^{
-        UIViewController *currentViewController = weakSelf.mainWindow.rootViewController;
+- (void)pushViewController:(UIViewController *) viewController {
+    
+    if (!viewController)
+        return;
+  
+    __weak typeof (self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        
+        __strong typeof (weakSelf) strongSelf = weakSelf;
+        UIViewController *currentViewController = strongSelf.mainWindow.rootViewController;
         while (currentViewController.presentedViewController != nil && !currentViewController.presentedViewController.isBeingDismissed) {
+            //stop if we find that an alert has been presented
+            if ([strongSelf alertIsPresented:currentViewController]) {
+                [strongSelf saveAlert:currentViewController.presentedViewController];
+                break;
+            }
             currentViewController = currentViewController.presentedViewController;
         }
         
-        if (currentViewController != nil) {
-            if (currentViewController != viewController
-                && viewController.presentedViewController != currentViewController) {
-                [weakSelf log:SFLogLevelDebug format:@"pushViewController: Presenting view controller (%@).", viewController];
-                
-                [weakSelf enumerateDelegates:^(id<SFRootViewManagerDelegate> delegate) {
-                    if ([delegate respondsToSelector:@selector(rootViewManager:willPushViewControler:)]) {
-                        [delegate rootViewManager:weakSelf willPushViewControler:viewController];
-                    }
-                }];
-                
-                [currentViewController presentViewController:viewController animated:NO completion:NULL];
-            } else {
-                [weakSelf log:SFLogLevelDebug format:@"pushViewController: View controller (%@) is already presented.", viewController];
-            }
+        if (currentViewController) {
+            //invoke delegates and then present
+            if (currentViewController!=viewController)
+                [strongSelf presentViewController:viewController using:currentViewController];
+            else
+                [SFSDKCoreLogger d:[strongSelf class] format:@"pushViewController: View controller (%@) has already been presented.", viewController];
         } else {
-            [weakSelf log:SFLogLevelDebug format:@"pushViewController: Making view controller (%@) the root view controller.", viewController];
-            weakSelf.mainWindow.rootViewController = viewController;
-            [self saveCurrentKeyWindow];
-            [weakSelf.mainWindow makeKeyAndVisible];
+            [SFSDKCoreLogger d:[strongSelf class] format:@"pushViewController: Making view controller (%@) the root view controller.", viewController];
+            strongSelf.mainWindow.rootViewController = viewController;
+            [strongSelf saveCurrentKeyWindow];
+            [strongSelf.mainWindow makeKeyAndVisible];
         }
-    };
+    });
     
-    dispatch_async(dispatch_get_main_queue(), pushControllerBlock);
 }
 
-- (void)popViewController:(UIViewController *)viewController
-{
-    __weak SFRootViewManager *weakSelf = self;
-    void (^popControllerBlock)(void) = ^{
-        UIViewController *currentViewController = weakSelf.mainWindow.rootViewController;
-        if (currentViewController == viewController) {
-            [weakSelf log:SFLogLevelDebug format:@"popViewController: Removing rootViewController (%@).", viewController];
-            weakSelf.mainWindow.rootViewController = nil;
-            [self restorePreviousKeyWindow];
-        } else {
-            while ((currentViewController != nil) && (currentViewController != viewController)) {
-                currentViewController = [currentViewController presentedViewController];
-            }
-            
-            if (currentViewController == nil) {
-                [weakSelf log:SFLogLevelDebug format:@"popViewController: View controller (%@) not found in the view controller stack.  No action taken.", viewController];
-            } else {
-                [weakSelf log:SFLogLevelDebug format:@"popViewController: View controller (%@) is now being dismissed from presentation.", viewController];
-                [[currentViewController presentingViewController] dismissViewControllerAnimated:NO completion:^{
-                    [weakSelf enumerateDelegates:^(id<SFRootViewManagerDelegate> delegate) {
-                        if ([delegate respondsToSelector:@selector(rootViewManager:didPopViewControler:)]) {
-                            [delegate rootViewManager:weakSelf didPopViewControler:viewController];                            
-                        }
-                    }];
-                }];
-            }
-        }
-    };
+- (void)popViewController:(UIViewController *) viewController {
     
-    dispatch_async(dispatch_get_main_queue(), popControllerBlock);
+    if (!viewController)
+        return;
+    
+    __weak typeof (self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        __strong typeof (weakSelf) strongSelf = weakSelf;
+        UIViewController *currentViewController = strongSelf.mainWindow.rootViewController;
+        if (currentViewController != viewController) {
+            // look for controller
+            while (currentViewController && currentViewController.presentedViewController!=viewController) {
+                currentViewController = currentViewController.presentedViewController;
+            }
+            // if controller is found dismiss the view, invoke delegates && restore Alerts if required.
+            if (viewController == currentViewController.presentedViewController) {
+                [SFSDKCoreLogger d:[strongSelf class] format:@"popViewController: View controller (%@) is now being dismissed from presentation.", viewController];
+                [strongSelf dismissPresentedViewController:currentViewController];
+            }else{
+                [SFSDKCoreLogger d:[strongSelf class] format:@"popViewController: View controller (%@) not found in the view controller stack.  No action taken.", viewController];
+            }
+        } else {
+            [SFSDKCoreLogger d:[strongSelf class] format:@"popViewController: Removing rootViewController (%@).", viewController];
+            strongSelf.mainWindow.rootViewController = nil;
+            [strongSelf restorePreviousKeyWindow];
+            
+        }
+    });
 }
 
 #pragma mark - Private
-
 - (void)saveCurrentKeyWindow
 {
     for (UIWindow* w in [SFApplicationHelper sharedApplication].windows) {
@@ -188,4 +186,46 @@
     self.previousKeyWindow = nil;
 }
 
+- (BOOL)alertWasPresent{
+    return self->_modalViewController?YES:NO;
+}
+
+- (BOOL)alertIsPresented:(UIViewController *) current {
+    return [current.presentedViewController isKindOfClass:[UIAlertController class]];
+}
+
+- (void)saveAlert:(UIViewController *) alert {
+    self ->_modalViewController = alert;
+    [alert dismissViewControllerAnimated:NO completion:nil];
+}
+
+- (void)restoreAlert:(UIViewController *) presentingViewController {
+    [presentingViewController presentViewController:self->_modalViewController  animated:NO completion:^{
+        self ->_modalViewController = nil;
+    }];
+}
+
+- (void)presentViewController:(UIViewController *)toBePresented using:(UIViewController *)presentingViewController {
+    [self enumerateDelegates:^(id<SFRootViewManagerDelegate> delegate) {
+        if ([delegate respondsToSelector:@selector(rootViewManager:willPushViewControler:)]) {
+            [delegate rootViewManager:self willPushViewControler:toBePresented];
+        }
+    }];
+    [presentingViewController presentViewController:toBePresented animated:NO completion:nil];
+}
+
+- (void)dismissPresentedViewController :(UIViewController *)presentingViewController {
+    __weak typeof (self) weakSelf = self;
+    [presentingViewController.presentedViewController dismissViewControllerAnimated:NO completion:^{
+        __strong typeof (weakSelf) strongSelf = weakSelf;
+        if ([strongSelf alertWasPresent]) {
+            [strongSelf restoreAlert:presentingViewController];
+        }
+        [strongSelf enumerateDelegates:^(id<SFRootViewManagerDelegate> delegate) {
+            if ([delegate respondsToSelector:@selector(rootViewManager:didPopViewControler:)]) {
+                [delegate rootViewManager:strongSelf didPopViewControler:presentingViewController.presentedViewController];
+            }
+        }];
+    }];
+}
 @end

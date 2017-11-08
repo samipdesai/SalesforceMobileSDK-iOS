@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -25,7 +25,6 @@
 #import "NSDictionary+SFAdditions.h"
 #import "NSString+SFAdditions.h"
 #import "NSArray+SFAdditions.h"
-#import "SFLogger.h"
 
 @implementation NSDictionary (SFAdditions)
 
@@ -70,7 +69,7 @@
                                                          error:&error];
     NSString *jsonString = nil;
     if (error) {
-        [self log:SFLogLevelWarning format:@"Unable to serializing to JSON string. NSDictionary:%@. Error:%@", self, error];
+        [SFSDKCoreLogger w:[self class] format:@"Unable to serializing to JSON string. NSDictionary:%@. Error:%@", self, error];
         jsonString = @"{}";
     } else {
         jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];

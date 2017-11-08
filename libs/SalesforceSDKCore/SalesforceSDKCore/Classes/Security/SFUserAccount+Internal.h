@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012-2014, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -24,12 +24,21 @@
 
 #import "SFUserAccount.h"
 
-// The temporary user identity
-static NSString * const SFUserAccountManagerTemporaryUserAccountUserId = @"TEMP_USER_ID";
-static NSString * const SFUserAccountManagerTemporaryUserAccountOrgId = @"TEMP_ORG_ID";
 
 @interface SFUserAccount ()
 
 @property (nonatomic, readwrite, getter = isUserDeleted) BOOL userDeleted;
+@property (nonatomic, readwrite, assign) SFUserAccountLoginState loginState;
+
+/*!
+ * @method transitionToLoginState:
+ * @abstract Attempts to transition from the current login state to the new login state.
+ * @discussion Only certain state transitions are allowed.  For example, you cannot transition
+ * from `SFUserAccountLoginStateNotLoggedIn` to `SFUserAccountLoginStateNotLoggingOut`, but
+ * you can transition from `SFUserAccountLoginStateNotLoggedIn` to `SFUserAccountLoginStateLoggedIn`.
+ * @param newLoginState The new login state to set.
+ * @return YES if the login state change was successful, NO otherwise.
+ */
+- (BOOL)transitionToLoginState:(SFUserAccountLoginState)newLoginState;
 
 @end

@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2012-2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2012-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -51,62 +51,53 @@ NSString * const kExternalIdPathArg   = @"externalIdPath";
 NSString * const kPathsArg            = @"paths";
 NSString * const kReIndexDataArg      = @"reIndexData";
 NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
+NSString * const kStoreName           = @"storeName";
 
-@interface SFSmartStorePlugin() 
+@interface SFSmartStorePlugin() {
+      dispatch_queue_t _dispatchQueue;
+}
 
-@property (nonatomic, strong) SFSmartStoreInspectorViewController *inspector;
-@property (nonatomic, strong) SFSmartStoreInspectorViewController *globalInspector;
-@property (nonatomic, strong) SFSmartStore *store;
-@property (nonatomic, strong) SFSmartStore *globalStore;
-@property (nonatomic, strong) NSMutableDictionary *userCursorCache;
-@property (nonatomic, strong) NSMutableDictionary *globalCursorCache;
-
+@property (nonatomic, strong) NSMutableDictionary *cursorCache;
 @end
 
 @implementation SFSmartStorePlugin
 
-- (void)resetSharedStore
+- (void)resetCursorCaches
 {
-    [[self userCursorCache] removeAllObjects];
-}
-
-- (SFSmartStore *)store
-{
-    return [SFSmartStore sharedStoreWithName:kDefaultSmartStoreName];
-}
-
-- (SFSmartStore *)globalStore
-{
-    return [SFSmartStore sharedGlobalStoreWithName:kDefaultSmartStoreName];
+    dispatch_sync(_dispatchQueue, ^{
+        [self.cursorCache removeAllObjects];
+    });
 }
 
 - (void)pluginInitialize
 {
-    [self log:SFLogLevelDebug msg:@"SFSmartStorePlugin pluginInitialize"];
-    self.userCursorCache = [[NSMutableDictionary alloc] init];
-    self.globalCursorCache = [[NSMutableDictionary alloc] init];
-    self.inspector = [[SFSmartStoreInspectorViewController alloc] initWithStore:self.store];
-    self.globalInspector = [[SFSmartStoreInspectorViewController alloc] initWithStore:self.globalStore];
+    [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"SFSmartStorePlugin pluginInitialize"]];
+    self.cursorCache = [[NSMutableDictionary alloc] init];
+    _dispatchQueue = dispatch_queue_create([@"SFSmartStorePlugin CursorCache Queue" UTF8String], DISPATCH_QUEUE_SERIAL);
 }
 
 #pragma mark - Object bridging helpers
 
-- (SFStoreCursor*)cursorByCursorId:(NSString*)cursorId isGlobal:(BOOL)isGlobal
+- (SFStoreCursor*)cursorByCursorId:(NSString*)cursorId withArgs:(NSDictionary *) argsDict
 {
-    return (isGlobal ? self.globalCursorCache[cursorId] : self.userCursorCache[cursorId]);
+    NSString *internalCursorId = [self internalCursorId:cursorId withArgs:argsDict];
+    __block SFStoreCursor *cursor;
+    dispatch_sync(_dispatchQueue, ^{
+        cursor = self.cursorCache[internalCursorId];
+    });
+    return cursor;
 }
 
-- (void)closeCursorWithId:(NSString *)cursorId isGlobal:(BOOL)isGlobal
+- (void)closeCursorWithId:(NSString *)cursorId withArgs:(NSDictionary *) argsDict
 {
-    SFStoreCursor *cursor = [self cursorByCursorId:cursorId isGlobal:isGlobal];
+    SFStoreCursor *cursor = [self cursorByCursorId:cursorId withArgs:argsDict];
     if (nil != cursor) {
         [cursor close];
-        if (isGlobal) {
-            [self.globalCursorCache removeObjectForKey:cursorId];
-        } else {
-            [self.userCursorCache removeObjectForKey:cursorId];
-        }
-    } 
+        NSString *internalCursorId = [self internalCursorId:cursorId withArgs:argsDict];
+        dispatch_sync(_dispatchQueue, ^{
+           [self.cursorCache removeObjectForKey:internalCursorId];
+        });
+    }
 }
 
 #pragma mark - SmartStore plugin methods
@@ -115,7 +106,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
 {
     [self runCommand:^(NSDictionary* argsDict) {
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
-        [self log:SFLogLevelDebug format:@"pgSoupExists with soup name '%@'.", soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgSoupExists with soup name '%@'.", soupName]];
         BOOL exists = [[self getStoreInst:argsDict] soupExists:soupName];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:exists];
     } command:command];
@@ -125,7 +116,6 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
 {
     NSDictionary *argsDict = [self getArgument:command.arguments atIndex:0];
     SFSmartStore *smartStore = [self getStoreInst:argsDict];
-
     [self runCommand:^(NSDictionary* argsDict) {
         NSDictionary *soupSpecDict = [argsDict nonNullObjectForKey:kSoupSpecArg];
         SFSoupSpec *soupSpec = nil;
@@ -136,8 +126,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
             soupSpec = [SFSoupSpec newSoupSpec:soupName withFeatures:nil];
         }
         NSArray *indexSpecs = [SFSoupIndex asArraySoupIndexes:[argsDict nonNullObjectForKey:kIndexesArg]];
-        
-        [self log:SFLogLevelDebug format:@"pgRegisterSoup with name: %@, soup features: %@, indexSpecs: %@", soupSpec.soupName, soupSpec.features, indexSpecs];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgRegisterSoup with name: %@, soup features: %@, indexSpecs: %@", soupSpec.soupName, soupSpec.features, indexSpecs]];
         if (smartStore) {
             NSError *error = nil;
             BOOL result = [smartStore registerSoupWithSpec:soupSpec withIndexSpecs:indexSpecs error:&error];
@@ -158,7 +147,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
 {
     [self runCommand:^(NSDictionary* argsDict) {
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
-        [self log:SFLogLevelDebug format:@"pgRemoveSoup with name: %@", soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgRemoveSoup with name: %@", soupName]];
         [[self getStoreInst:argsDict] removeSoup:soupName];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"OK"];
     } command:command];
@@ -170,18 +159,17 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
         NSString *soupName = argsDict[kSoupNameArg];
         NSDictionary *querySpecDict = [argsDict nonNullObjectForKey:kQuerySpecArg];
         SFQuerySpec* querySpec = [[SFQuerySpec alloc] initWithDictionary:querySpecDict withSoupName:soupName];
-        [self log:SFLogLevelDebug format:@"pgQuerySoup with name: %@, querySpec: %@", soupName, querySpecDict];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgQuerySoup with name: %@, querySpec: %@", soupName, querySpecDict]];
         NSError* error = nil;
         SFStoreCursor* cursor = [self runQuery:querySpec error:&error argsDict:argsDict];
         if (cursor.cursorId) {
-            if ([self isGlobal:argsDict] && self.globalCursorCache) {
-                (self.globalCursorCache)[cursor.cursorId] = cursor;
-            } else if (self.userCursorCache) {
-                (self.userCursorCache)[cursor.cursorId] = cursor;
-            }
+            NSString *internalCursorId = [self internalCursorId:cursor.cursorId withArgs:argsDict];
+            dispatch_sync(self->_dispatchQueue, ^{
+               self.cursorCache[internalCursorId] = cursor;
+            });
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[cursor asDictionary]];
         } else {
-            [self log:SFLogLevelError format:@"No cursor for query: %@", querySpec];
+            [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"No cursor for query: %@", querySpec]];
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
         }
     } command:command];
@@ -213,7 +201,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
     [self runCommand:^(NSDictionary* argsDict) {
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
         NSArray *rawIds = [argsDict nonNullObjectForKey:kEntryIdsArg];
-        [self log:SFLogLevelDebug format:@"pgRetrieveSoupEntries with soup name: %@", soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgRetrieveSoupEntries with soup name: %@", soupName]];
         NSArray *entries = [[self getStoreInst:argsDict] retrieveEntries:rawIds fromSoup:soupName];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:entries];
     } command:command];
@@ -225,7 +213,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
         NSArray *entries = [argsDict nonNullObjectForKey:kEntriesArg];
         NSString *externalIdPath = [argsDict nonNullObjectForKey:kExternalIdPathArg];
-        [self log:SFLogLevelDebug format:@"pgUpsertSoupEntries with soup name: %@, external ID path: %@", soupName, externalIdPath];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgUpsertSoupEntries with soup name: %@, external ID path: %@", soupName, externalIdPath]];
         NSError *error = nil;
         NSArray *resultEntries = [[self getStoreInst:argsDict] upsertEntries:entries toSoup:soupName withExternalIdPath:externalIdPath error:&error];
         if (nil != resultEntries) {
@@ -242,22 +230,18 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
         NSArray *entryIds = [argsDict nonNullObjectForKey:kEntryIdsArg];
         NSDictionary *querySpecDict = [argsDict nonNullObjectForKey:kQuerySpecArg];
-
-        [self log:SFLogLevelDebug format:@"pgRemoveFromSoup with soup name: %@", soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgRemoveFromSoup with soup name: %@", soupName]];
         NSError *error = nil;
         if (entryIds) {
             [[self getStoreInst:argsDict] removeEntries:entryIds fromSoup:soupName error:&error];
-        }
-        else {
+        } else {
             SFQuerySpec* querySpec = [[SFQuerySpec alloc] initWithDictionary:querySpecDict withSoupName:soupName];
             [[self getStoreInst:argsDict] removeEntriesByQuery:querySpec fromSoup:soupName error:&error];
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"OK"];
         }
-
         if (error == nil) {
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"OK"];
-        }
-        else {
+        } else {
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
         }
         
@@ -268,8 +252,8 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
 {
     [self runCommand:^(NSDictionary* argsDict) {
         NSString *cursorId = [argsDict nonNullObjectForKey:kCursorIdArg];
-        [self log:SFLogLevelDebug format:@"pgCloseCursor with cursor ID: %@", cursorId];
-        [self closeCursorWithId:cursorId isGlobal:[self isGlobal:argsDict]];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgCloseCursor with cursor ID: %@", cursorId]];
+        [self closeCursorWithId:cursorId withArgs:argsDict];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"OK"];
     } command:command];
 }
@@ -279,8 +263,8 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
     [self runCommand:^(NSDictionary* argsDict) {
         NSString *cursorId = [argsDict nonNullObjectForKey:kCursorIdArg];
         NSNumber *newPageIndex = [argsDict nonNullObjectForKey:kIndexArg];
-        [self log:SFLogLevelDebug format:@"pgMoveCursorToPageIndex with cursor ID: %@, page index: %@", cursorId, newPageIndex];
-        SFStoreCursor *cursor = [self cursorByCursorId:cursorId isGlobal:[self isGlobal:argsDict]];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgMoveCursorToPageIndex with cursor ID: %@, page index: %@", cursorId, newPageIndex]];
+        SFStoreCursor *cursor = [self cursorByCursorId:cursorId withArgs:argsDict];
         [cursor setCurrentPageIndex:newPageIndex];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[cursor asDictionary]];
     } command:command];
@@ -290,7 +274,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
 {
     [self runCommand:^(NSDictionary* argsDict) {
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
-        [self log:SFLogLevelDebug format:@"pgClearSoup with name: %@", soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgClearSoup with name: %@", soupName]];
         [[self getStoreInst:argsDict] clearSoup:soupName];
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"OK"];
     } command:command];
@@ -322,7 +306,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
         }
         NSArray *indexSpecs = [SFSoupIndex asArraySoupIndexes:[argsDict nonNullObjectForKey:kIndexesArg]];
         BOOL reIndexData = [[argsDict nonNullObjectForKey:kReIndexDataArg] boolValue];
-        [self log:SFLogLevelDebug format:@"pgAlterSoup with name: %@, soup features: %@, indexSpecs: %@, reIndexData: %@", soupName, soupSpec.features, indexSpecs, reIndexData ? @"true" : @"false"];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgAlterSoup with name: %@, soup features: %@, indexSpecs: %@, reIndexData: %@", soupName, soupSpec.features, indexSpecs, reIndexData ? @"true" : @"false"]];
         BOOL alterOk = [[self getStoreInst:argsDict] alterSoup:soupName withSoupSpec:soupSpec withIndexSpecs:indexSpecs reIndexData:reIndexData];
         if (alterOk) {
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:soupName];
@@ -337,7 +321,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
     [self runCommand:^(NSDictionary* argsDict) {
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
         NSArray *indexPaths = [argsDict nonNullObjectForKey:kPathsArg];
-        [self log:SFLogLevelDebug format:@"pgReIndexSoup with soup name: %@, indexPaths: %@", soupName, indexPaths];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgReIndexSoup with soup name: %@, indexPaths: %@", soupName, indexPaths]];
         BOOL regOk = [[self getStoreInst:argsDict] reIndexSoup:soupName withIndexPaths:indexPaths];
         if (regOk) {
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:soupName];
@@ -350,9 +334,11 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
 - (void)pgShowInspector:(CDVInvokedUrlCommand *)command
 {
     [self runCommand:^(NSDictionary* argsDict) {
-        BOOL isGlobal = [self isGlobal:argsDict];
-        SFSmartStoreInspectorViewController* inspector = isGlobal ? self.globalInspector : self.inspector;
-        [inspector present:self.viewController];
+        __weak typeof(self) weakSelf = self;
+        SFSmartStoreInspectorViewController *inspector = [self inspector:command];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf.viewController presentViewController:inspector animated:NO completion:nil];
+        });
         return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"OK"];
     } command:command];
 }
@@ -361,7 +347,7 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
 {
     [self runCommand:^(NSDictionary* argsDict) {
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
-        [self log:SFLogLevelDebug format:@"pgGetSoupIndexSpecs with soup name: %@", soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgGetSoupIndexSpecs with soup name: %@", soupName]];
         NSArray *indexSpecsAsDicts = [SFSoupIndex asArrayOfDictionaries:[[self getStoreInst:argsDict] indicesForSoup:soupName] withColumnName:NO];
         if ([indexSpecsAsDicts count] > 0) {
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:indexSpecsAsDicts];
@@ -372,11 +358,10 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
 }
 
 - (void)pgGetSoupSpec:(CDVInvokedUrlCommand *)command {
-    NSDictionary *argsDict = [self getArgument:command.arguments atIndex:0];
-    SFSmartStore *store = [self getStoreInst:argsDict];
     [self runCommand:^(NSDictionary* argsDict) {
+        SFSmartStore *store = [self getStoreInst:argsDict];
         NSString *soupName = [argsDict nonNullObjectForKey:kSoupNameArg];
-        [self log:SFLogLevelDebug format:@"pgGetSoupSpec with soup name: %@", soupName];
+        [SFSDKHybridLogger d:[self class] format:[NSString stringWithFormat:@"pgGetSoupSpec with soup name: %@", soupName]];
         SFSoupSpec *soupSpec = [store attributesForSoup:soupName];
         if (soupSpec) {
             return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[soupSpec asDictionary]];
@@ -386,9 +371,74 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
     } command:command];
 }
 
+- (void)pgGetAllGlobalStores:(CDVInvokedUrlCommand *)command {
+    [self runCommand:^(NSDictionary* argsDict) {
+        NSArray *allStoreNames = [SFSmartStore allGlobalStoreNames];
+        NSMutableArray *result = [NSMutableArray array];
+        if (allStoreNames.count >0 ) {
+            for(NSString *storeName in allStoreNames) {
+                NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+                dictionary[kStoreName] = storeName;
+                dictionary[kIsGlobalStoreArg] = @YES;
+                [result addObject:dictionary];
+            }
+        }
+        return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:result];
+     }
+     command:command];
+}
+
+- (void)pgGetAllStores:(CDVInvokedUrlCommand *)command {
+    [self runCommand:^(NSDictionary* argsDict) {
+        NSArray *allStoreNames = [SFSmartStore allStoreNames];
+        NSMutableArray *result = [NSMutableArray array];
+        if (allStoreNames.count >0 ) {
+            for(NSString *storeName in allStoreNames) {
+                NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+                dictionary[kStoreName] = storeName;
+                dictionary[kIsGlobalStoreArg] = @NO;
+                [result addObject:dictionary];
+            }
+        }
+        return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:result];
+    } command:command];
+
+}
+
+- (void)pgRemoveStore:(CDVInvokedUrlCommand *)command {
+    [self runCommand:^(NSDictionary* argsDict) {
+        BOOL isGlobal = [self isGlobal:argsDict];
+        NSString *storeName = [self storeName:argsDict];
+        if (isGlobal) {
+            [SFSmartStore removeSharedGlobalStoreWithName:storeName];
+        }else {
+            [SFSmartStore removeSharedStoreWithName:storeName];
+        }
+        return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:@YES];
+    } command:command];
+}
+
+- (void)pgRemoveAllGlobalStores:(CDVInvokedUrlCommand *)command {
+    [self runCommand:^(NSDictionary* argsDict) {
+        [SFSmartStore removeAllGlobalStores];
+        return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:@YES];
+    } command:command];
+}
+
+- (void)pgRemoveAllStores:(CDVInvokedUrlCommand *)command {
+    [self runCommand:^(NSDictionary* argsDict) {
+        [SFSmartStore removeAllStores];
+        return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:@YES];
+    } command:command];
+
+}
+
 - (SFSmartStore *)getStoreInst:(NSDictionary *)args
 {
-    return ([self isGlobal:args] ? self.globalStore : self.store);
+    NSString *storeName = [self storeName:args];
+    BOOL isGlobal = [self isGlobal:args];
+    SFSmartStore *storeInst = [self storeWithName:storeName isGlobal:isGlobal];
+    return storeInst;
 }
 
 - (BOOL)isGlobal:(NSDictionary *)args
@@ -396,4 +446,44 @@ NSString * const kIsGlobalStoreArg    = @"isGlobalStore";
     return args[kIsGlobalStoreArg] != nil && [args[kIsGlobalStoreArg] boolValue];
 }
 
+- (NSString *)storeName:(NSDictionary *)args
+{
+    NSString *storeName = [args nonNullObjectForKey:kStoreName];
+    if(storeName==nil) {
+        storeName = kDefaultSmartStoreName;
+    }
+    return storeName;
+}
+
+- (SFSmartStoreInspectorViewController *)inspector:(CDVInvokedUrlCommand *)command
+{
+    NSDictionary *argsDict = [self getArgument:command.arguments atIndex:0];
+    SFSmartStore *store = [self getStoreInst:argsDict];
+    return [[SFSmartStoreInspectorViewController alloc] initWithStore:store];
+}
+
+- (SFSmartStore *)storeWithName:(NSString *)storeName isGlobal:(BOOL) isGlobal
+{
+   
+    SFSmartStore *store = isGlobal?[SFSmartStore sharedGlobalStoreWithName:storeName]:
+                                   [SFSmartStore sharedStoreWithName:storeName];
+    return store;
+}
+
+- (NSString *)internalCursorId:(NSString *) cursorId withArgs:(NSDictionary *) argsDict {
+    NSString *storeName = [self storeName:argsDict];
+    BOOL isGlobal = [self isGlobal:argsDict];
+    return [self internalCursorId:cursorId withGlobal:isGlobal andStoreName:storeName];
+}
+
+- (NSString *)internalCursorId:(NSString *) cursorId withGlobal:(BOOL) isGlobal andStoreName:(NSString *) storeName{
+    if(storeName==nil)
+        storeName = kDefaultSmartStoreName;
+    NSString *internalCursorId = [NSString stringWithFormat:@"%@_%@_%d",storeName,cursorId,isGlobal];
+    return internalCursorId;
+}
+
+- (void)dealloc {
+    SFRelease(_cursorCache);
+}
 @end

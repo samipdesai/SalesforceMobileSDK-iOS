@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2011, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2011-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -30,7 +30,6 @@
 typedef NS_ENUM(NSUInteger, SFOAuthTokenEndpointFlow) {
     SFOAuthTokenEndpointFlowNone = 0,
     SFOAuthTokenEndpointFlowRefresh,
-    SFOAuthTokenEndpointFlowIPBypass,
     SFOAuthTokenEndpointFlowAdvancedBrowser
 };
 
@@ -40,6 +39,7 @@ typedef NS_ENUM(NSUInteger, SFOAuthTokenEndpointFlow) {
 
 - (void)beginUserAgentFlow;
 - (void)beginTokenEndpointFlow:(SFOAuthTokenEndpointFlow)flowType;
+- (void)beginJwtTokenExchangeFlow;
 - (void)handleTokenEndpointResponse:(NSMutableData *)data;
 - (void)beginNativeBrowserFlow;
 - (void)retrieveOrgAuthConfiguration:(void (^)(SFOAuthOrgAuthConfiguration*, NSError*))retrievedAuthConfigBlock;
@@ -54,19 +54,17 @@ typedef NS_ENUM(NSUInteger, SFOAuthTokenEndpointFlow) {
 @property (nonatomic, strong) NSMutableData *responseData;
 @property (nonatomic, assign) BOOL initialRequestLoaded;
 @property (nonatomic, copy) NSString *approvalCode;
-@property (nonatomic, strong) NSTimer *refreshFlowConnectionTimer;
-@property (nonatomic, strong) NSThread *refreshTimerThread;
 @property (nonatomic, strong) WKWebView *view;
 @property (nonatomic, strong) NSString *codeVerifier;
 @property (nonatomic, strong) SFOAuthInfo *authInfo;
 @property (nonatomic, readwrite) SFOAuthAdvancedAuthState advancedAuthState;
 @property (nonatomic, copy) NSString *origWebUserAgent;
 
-- (void)startRefreshFlowConnectionTimer;
-- (void)stopRefreshFlowConnectionTimer;
-- (void)refreshFlowConnectionTimerFired:(NSTimer *)rfcTimer;
-- (void)invalidateRefreshTimer;
-- (void)cleanupRefreshTimer;
+/** UpdateCredentials and record changes to instanceUrl,accessToken,communityId
+  @param params NV pairs received from token endpoint.
+ */
+- (void) updateCredentials:(NSDictionary *) params;
+
 - (void)handleUserAgentResponse:(NSURL *)requestUrl;
 
 /**
@@ -77,9 +75,15 @@ typedef NS_ENUM(NSUInteger, SFOAuthTokenEndpointFlow) {
  Notify our delegate that login succeeded, and clear authenticating flag
  */
 - (void)notifyDelegateOfSuccess:(SFOAuthInfo *)authInfo;
+/**
+ * Used for testing only.
+ * @return A String representing the prepared authorize url
+ */
+- (NSString *)generateApprovalUrlString;
 
 + (NSDictionary *)parseQueryString:(NSString *)query;
 + (NSError *)errorWithType:(NSString *)type description:(NSString *)description;
++ (NSError *)errorWithType:(NSString *)type description:(NSString *)description underlyingError:(NSError *)underlyingError;
 + (NSDate *)timestampStringToDate:(NSString *)timestamp;
 
 @end

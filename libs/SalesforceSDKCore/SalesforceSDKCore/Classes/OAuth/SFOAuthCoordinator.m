@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2011, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2011-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -32,6 +32,17 @@
 #import "NSData+SFSDKUtils.h"
 #import "NSString+SFAdditions.h"
 #import "SFApplicationHelper.h"
+#import "NSURL+SFStringUtils.h"
+#import "SFUserAccountManager.h"
+#import "SFSDKLoginHostStorage.h"
+#import "SFSDKLoginHost.h"
+#import "SFSDKEventBuilderHelper.h"
+#import "SFSDKAppFeatureMarkers.h"
+#import "SalesforceSDKManager.h"
+#import "SFSDKWebViewStateManager.h"
+#import "SFNetwork.h"
+#import "SFRootViewManager.h"
+#import <SalesforceAnalytics/NSUserDefaults+SFAdditions.h>
 
 // Public constants
 
@@ -78,7 +89,6 @@ static NSString * const kSFOAuthApprovalCode                    = @"code";
 static NSString * const kSFOAuthGrantTypeAuthorizationCode      = @"authorization_code";
 static NSString * const kSFOAuthResponseTypeActivatedClientCode = @"activated_client_code";
 static NSString * const kSFOAuthResponseClientSecret            = @"client_secret";
-static NSString * const kSFOAuthClientSecretAnonymous           = @"anonymous";
 
 // OAuth Error Descriptions
 // see https://na1.salesforce.com/help/doc/en/remoteaccess_oauth_refresh_token_flow.htm
@@ -111,6 +121,8 @@ static NSString * const kHttpPostContentType                    = @"application/
 static NSString * const kHttpHeaderUserAgent                    = @"User-Agent";
 static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
 
+static NSString * const kSFAppFeatureSafariBrowserForLogin   = @"BW";
+
 @implementation SFOAuthCoordinator
 
 @synthesize credentials          = _credentials;
@@ -126,8 +138,6 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
 @synthesize initialRequestLoaded        = _initialRequestLoaded;
 @synthesize approvalCode                = _approvalCode;
 @synthesize scopes                      = _scopes;
-@synthesize refreshFlowConnectionTimer  = _refreshFlowConnectionTimer;
-@synthesize refreshTimerThread          = _refreshTimerThread;
 @synthesize advancedAuthConfiguration   = _advancedAuthConfiguration;
 @synthesize advancedAuthState           = _advancedAuthState;
 @synthesize codeVerifier                = _codeVerifier;
@@ -163,30 +173,26 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     _credentials = nil;
     _responseData = nil;
     _scopes = nil;
-    [self stopRefreshFlowConnectionTimer];
     [_view setNavigationDelegate:nil];
     _view = nil;
 }
 
 - (void)authenticate {
     NSAssert(nil != self.credentials, @"credentials cannot be nil");
-    NSAssert([self.credentials.clientId length] > 0, @"credentials.clientId cannot be nil or empty");
-    NSAssert([self.credentials.identifier length] > 0, @"credentials.identifier cannot be nil or empty");
+    NSAssert(self.credentials.clientId.length > 0, @"credentials.clientId cannot be nil or empty");
+    NSAssert(self.credentials.identifier.length > 0, @"credentials.identifier cannot be nil or empty");
+    NSAssert(self.credentials.domain.length > 0, @"credentials.domain cannot be nil or empty.");
     NSAssert(nil != self.delegate, @"cannot authenticate with nil delegate");
 
     if (self.authenticating) {
-        [self log:SFLogLevelDebug format:@"%@ Error: authenticate called while already authenticating. Call stopAuthenticating first.", NSStringFromSelector(_cmd)];
+        [SFSDKCoreLogger d:[self class] format:@"%@ Error: authenticate called while already authenticating. Call stopAuthenticating first.", NSStringFromSelector(_cmd)];
         return;
     }
-    if (self.credentials.logLevel < kSFOAuthLogLevelWarning) {
-        [self log:SFLogLevelDebug format:@"%@ authenticating as %@ %@ refresh token on '%@://%@' ...",
+    [SFSDKCoreLogger i:[self class] format:@"%@ authenticating as %@ %@ refresh token on '%@://%@' ...",
          NSStringFromSelector(_cmd),
          self.credentials.clientId, (nil == self.credentials.refreshToken ? @"without" : @"with"),
          self.credentials.protocol, self.credentials.domain];
-    }
-    
     self.authenticating = YES;
-    
     if (self.credentials.refreshToken) {
         self.authInfo = [[SFOAuthInfo alloc] initWithAuthType:SFOAuthTypeRefresh];
     } else {
@@ -196,7 +202,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     // Don't try to authenticate if there is no network available
     if ([self.delegate respondsToSelector:@selector(oauthCoordinatorIsNetworkAvailable:)] &&
         ![self.delegate oauthCoordinatorIsNetworkAvailable:self]) {
-        [self log:SFLogLevelDebug msg:@"Network is not available, so bypassing login"];
+        [SFSDKCoreLogger d:[self class] format:@"Network is not available, so bypassing login"];
         NSError *error = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorNotConnectedToInternet userInfo:nil];
         [self notifyDelegateOfFailure:error authInfo:self.authInfo];
         return;
@@ -206,8 +212,13 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
         // clear any access token we may have and begin refresh flow
         [self notifyDelegateOfBeginAuthentication];
         [self.oauthCoordinatorFlow beginTokenEndpointFlow:SFOAuthTokenEndpointFlowRefresh];
+    } else if (self.credentials.jwt) {
+        // JWT token existence means we're doing JWT token exchange.
+        self.authInfo = [[SFOAuthInfo alloc] initWithAuthType:SFOAuthTypeJwtTokenExchange];
+        [self notifyDelegateOfBeginAuthentication];
+        [self.oauthCoordinatorFlow beginJwtTokenExchangeFlow];
     } else {
-        __weak SFOAuthCoordinator *weakSelf = self;
+        __weak typeof(self) weakSelf = self;
         switch (self.advancedAuthConfiguration) {
             case SFOAuthAdvancedAuthConfigurationNone: {
                 [self notifyDelegateOfBeginAuthentication];
@@ -218,18 +229,21 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
                 // If advanced auth mode is allowed, we have to get auth configuration settings from the org, where
                 // available, and initiate advanced auth flows, if configured.
                 [self.oauthCoordinatorFlow retrieveOrgAuthConfiguration:^(SFOAuthOrgAuthConfiguration *orgAuthConfig, NSError *error) {
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
                     if (error) {
                         // That's fatal.
                         dispatch_async(dispatch_get_main_queue(), ^{
-                            [weakSelf notifyDelegateOfFailure:error authInfo:self.authInfo];
+                            __strong typeof(weakSelf) strongSelf = weakSelf;
+                            [strongSelf notifyDelegateOfFailure:error authInfo:strongSelf.authInfo];
                         });
                     } else if (orgAuthConfig.useNativeBrowserForAuth) {
-                        weakSelf.authInfo = [[SFOAuthInfo alloc] initWithAuthType:SFOAuthTypeAdvancedBrowser];
-                        [weakSelf notifyDelegateOfBeginAuthentication];
-                        [weakSelf.oauthCoordinatorFlow beginNativeBrowserFlow];
+                        strongSelf.authInfo = [[SFOAuthInfo alloc] initWithAuthType:SFOAuthTypeAdvancedBrowser];
+                        [strongSelf notifyDelegateOfBeginAuthentication];
+                        [strongSelf.oauthCoordinatorFlow beginNativeBrowserFlow];
                     } else {
-                        [self notifyDelegateOfBeginAuthentication];
-                        [weakSelf.oauthCoordinatorFlow beginUserAgentFlow];
+                        __strong typeof(weakSelf) strongSelf = weakSelf;
+                        [strongSelf notifyDelegateOfBeginAuthentication];
+                        [strongSelf.oauthCoordinatorFlow beginUserAgentFlow];
                     }
                 }];
                 break;
@@ -237,9 +251,10 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
             case SFOAuthAdvancedAuthConfigurationRequire: {
                 // Advanced auth mode is required.  Begin the advanced browser flow.
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    weakSelf.authInfo = [[SFOAuthInfo alloc] initWithAuthType:SFOAuthTypeAdvancedBrowser];
-                    [weakSelf notifyDelegateOfBeginAuthentication];
-                    [weakSelf.oauthCoordinatorFlow beginNativeBrowserFlow];
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    strongSelf.authInfo = [[SFOAuthInfo alloc] initWithAuthType:SFOAuthTypeAdvancedBrowser];
+                    [strongSelf notifyDelegateOfBeginAuthentication];
+                    [strongSelf.oauthCoordinatorFlow beginNativeBrowserFlow];
                 });
                 break;
             }
@@ -272,7 +287,6 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     [self.session invalidateAndCancel];
     _session = nil;
     
-    [self stopRefreshFlowConnectionTimer];
     self.authenticating = NO;
 }
 
@@ -281,53 +295,47 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     [self.credentials revoke];
 }
 
-- (void)setAdvancedAuthState:(SFOAuthAdvancedAuthState)advancedAuthState {
-    if (_advancedAuthState != advancedAuthState) {
-        _advancedAuthState = advancedAuthState;
-        
-        // Re-trigger the native browser flow if the app becomes active on `SFOAuthAdvancedAuthStateBrowserRequestInitiated` state.
-        if (_advancedAuthState == SFOAuthAdvancedAuthStateBrowserRequestInitiated) {
-            [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleAppDidBecomeActiveDuringAdvancedAuth:) name:UIApplicationDidBecomeActiveNotification object:nil];
-        }
-        else {
-            [[NSNotificationCenter defaultCenter] removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
-        }
-    }
-}
 
 - (BOOL)handleAdvancedAuthenticationResponse:(NSURL *)appUrlResponse {
-    if (self.advancedAuthState != SFOAuthAdvancedAuthStateBrowserRequestInitiated) {
-        [self log:SFLogLevelInfo format:@"%@ Current advanced auth state (%@) not compatible with handling app launch auth response.", NSStringFromSelector(_cmd), [[self class] advancedAuthStateDesc:self.advancedAuthState]];
-        return NO;
-    }
-    
+    [SFSDKAppFeatureMarkers registerAppFeature:kSFAppFeatureSafariBrowserForLogin];
     NSString *appUrlResponseString = [appUrlResponse absoluteString];
     if (![[appUrlResponseString lowercaseString] hasPrefix:[self.credentials.redirectUri lowercaseString]]) {
-        [self log:SFLogLevelInfo format:@"%@ URL does not match redirect URI.", NSStringFromSelector(_cmd)];
+        [SFSDKCoreLogger i:[self class] format:@"%@ URL does not match redirect URI.", NSStringFromSelector(_cmd)];
         return NO;
     }
-    
     NSString *query = [appUrlResponse query];
     if ([query length] == 0) {
-        [self log:SFLogLevelInfo format:@"%@ URL has no query string.", NSStringFromSelector(_cmd)];
+        [SFSDKCoreLogger i:[self class] format:@"%@ URL has no query string.", NSStringFromSelector(_cmd)];
         return NO;
     }
-    
     NSDictionary *queryDict = [[self class] parseQueryString:query decodeParams:NO];
     NSString *codeVal = queryDict[kSFOAuthResponseTypeCode];
     if ([codeVal length] == 0) {
-        [self log:SFLogLevelInfo format:@"%@ URL has no '%@' parameter value.", NSStringFromSelector(_cmd), kSFOAuthResponseTypeCode];
+        [SFSDKCoreLogger i:[self class] format:@"%@ URL has no '%@' parameter value.", NSStringFromSelector(_cmd), kSFOAuthResponseTypeCode];
         return NO;
     }
-    
     self.approvalCode = codeVal;
-    [self log:SFLogLevelInfo format:@"%@ Received advanced authentication response.  Beginning token exchange.", NSStringFromSelector(_cmd)];
+    [SFSDKCoreLogger i:[self class] format:@"%@ Received advanced authentication response.  Beginning token exchange.", NSStringFromSelector(_cmd)];
     self.advancedAuthState = SFOAuthAdvancedAuthStateTokenRequestInitiated;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.oauthCoordinatorFlow beginTokenEndpointFlow:SFOAuthTokenEndpointFlowAdvancedBrowser];
     });
     return YES;
 }
+
+#pragma mark - Properties
+
+- (WKWebView *)view {
+    if (_view == nil) {
+        WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+        config.processPool = SFSDKWebViewStateManager.sharedProcessPool;
+        _view = [[WKWebView alloc] initWithFrame:[[UIScreen mainScreen] bounds] configuration:config];
+        _view.navigationDelegate = self;
+        _view.UIDelegate = self;
+    }
+    return _view;
+}
+
 
 #pragma mark - Private Methods
 
@@ -383,7 +391,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
                               self.credentials.domain,
                               kSFOAuthEndPointAuthConfiguration
                               ];
-    [self log:SFLogLevelInfo format:@"%@ Advanced authentication configured.  Retrieving auth configuration from %@", NSStringFromSelector(_cmd), orgConfigUrl];
+    [SFSDKCoreLogger i:[self class] format:@"%@ Advanced authentication configured.  Retrieving auth configuration from %@", NSStringFromSelector(_cmd), orgConfigUrl];
     NSMutableURLRequest *orgConfigRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:orgConfigUrl]
                                                                     cachePolicy:NSURLRequestReloadIgnoringCacheData
                                                                 timeoutInterval:self.timeout];
@@ -391,7 +399,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     
     [[self.session dataTaskWithRequest:orgConfigRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *connectionError) {
         if (connectionError) {
-            [self log:SFLogLevelError format:@"%@ Error retrieving org auth config: %@", NSStringFromSelector(_cmd), [connectionError localizedDescription]];
+            [SFSDKCoreLogger e:[self class] format:@"%@ Error retrieving org auth config: %@", NSStringFromSelector(_cmd), [connectionError localizedDescription]];
             if (retrievedAuthConfigBlock != NULL) {
                 retrievedAuthConfigBlock(nil, connectionError);
                 return;
@@ -402,7 +410,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
         if (httpResponse.statusCode != 200) {
             // Anything other than a 200 means we didn't get data back, which means advanced
             // auth isn't supported for any orgs on that login host.
-            [self log:SFLogLevelInfo format:@"%@ No org auth config found at %@ (Status code: %ld)", NSStringFromSelector(_cmd), orgConfigUrl, httpResponse.statusCode];
+            [SFSDKCoreLogger i:[self class] format:@"%@ No org auth config found at %@ (Status code: %ld)", NSStringFromSelector(_cmd), orgConfigUrl, httpResponse.statusCode];
             if (retrievedAuthConfigBlock != NULL) {
                 retrievedAuthConfigBlock(nil, nil);
             }
@@ -410,7 +418,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
         }
         
         if (data == nil) {
-            [self log:SFLogLevelInfo format:@"%@ No org auth config data returned from %@", NSStringFromSelector(_cmd), orgConfigUrl];
+            [SFSDKCoreLogger i:[self class] format:@"%@ No org auth config data returned from %@", NSStringFromSelector(_cmd), orgConfigUrl];
             if (retrievedAuthConfigBlock != NULL) {
                 retrievedAuthConfigBlock(nil, nil);
                 return;
@@ -420,13 +428,13 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
         NSError *jsonParseError = nil;
         NSDictionary *configDict = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonParseError];
         if (jsonParseError) {
-            [self log:SFLogLevelInfo format:@"%@ Could not parse org auth config response from %@: %@", NSStringFromSelector(_cmd), orgConfigUrl, [jsonParseError localizedDescription]];
+            [SFSDKCoreLogger i:[self class] format:@"%@ Could not parse org auth config response from %@: %@", NSStringFromSelector(_cmd), orgConfigUrl, [jsonParseError localizedDescription]];
             if (retrievedAuthConfigBlock != NULL) {
                 retrievedAuthConfigBlock(nil, nil);
             }
         }
         
-        [self log:SFLogLevelInfo format:@"%@ Successfully retrieved org auth config data from %@", NSStringFromSelector(_cmd), orgConfigUrl];
+        [SFSDKCoreLogger i:[self class] format:@"%@ Successfully retrieved org auth config data from %@", NSStringFromSelector(_cmd), orgConfigUrl];
         SFOAuthOrgAuthConfiguration *orgAuthConfig = [[SFOAuthOrgAuthConfiguration alloc] initWithConfigDict:configDict];
         if (retrievedAuthConfigBlock != NULL) {
             retrievedAuthConfigBlock(orgAuthConfig, nil);
@@ -436,7 +444,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
 
 - (void)beginNativeBrowserFlow {
     if ([self.delegate respondsToSelector:@selector(oauthCoordinator:willBeginBrowserAuthentication:)]) {
-        __weak SFOAuthCoordinator *weakSelf = self;
+        __weak typeof(self) weakSelf = self;
         [self.delegate oauthCoordinator:self willBeginBrowserAuthentication:^(BOOL proceed) {
             if (proceed) {
                 [weakSelf continueNativeBrowserFlow];
@@ -460,7 +468,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     //      ?client_id=<Connected App ID>&redirect_uri=<Connected App Redirect URI>&display=touch
     //      &response_type=code
     NSMutableString *approvalUrl = [[NSMutableString alloc] initWithFormat:@"%@://%@%@?%@=%@&%@=%@&%@=%@&%@=%@",
-                                    self.credentials.protocol, self.credentials.domain, kSFOAuthEndPointAuthorize,
+                                    self.credentials.protocol, self.credentials.domain, [self brandedAuthorizeURL],
                                     kSFOAuthClientId, self.credentials.clientId,
                                     kSFOAuthRedirectUri, self.credentials.redirectUri,
                                     kSFOAuthDisplay, kSFOAuthDisplayTouch,
@@ -481,30 +489,13 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     [approvalUrl appendFormat:@"&%@=%@", kSFOAuthCodeChallengeParamName, codeChallengeString];
     
     // Launch the native browser.
-    [self log:SFLogLevelDebug format:@"%@: Initiating native browser flow with URL %@", NSStringFromSelector(_cmd), approvalUrl];
+    [SFSDKCoreLogger d:[self class] format:@"%@: Initiating native browser flow with URL %@", NSStringFromSelector(_cmd), approvalUrl];
     NSURL *nativeBrowserUrl = [NSURL URLWithString:approvalUrl];
-    BOOL browserOpenSucceeded = [SFApplicationHelper openURL:nativeBrowserUrl];
-    if (!browserOpenSucceeded) {
-        [self log:SFLogLevelError format:@"%@: Could not launch native browser with URL %@", NSStringFromSelector(_cmd), approvalUrl];
-        NSError *launchError = [[self class] errorWithType:kSFOAuthErrorTypeBrowserLaunchFailed description:@"The native browser failed to launch for advanced authentication."];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self notifyDelegateOfFailure:launchError authInfo:self.authInfo];
-        });
-    } else {
-        self.advancedAuthState = SFOAuthAdvancedAuthStateBrowserRequestInitiated;
-    }
-    
-}
 
-- (void)handleAppDidBecomeActiveDuringAdvancedAuth:(NSNotification*)notification {
-    BOOL retryAuth = YES;
-    if ([self.delegate respondsToSelector:@selector(oauthCoordinatorRetryAuthenticationOnApplicationDidBecomeActive:)]) {
-        retryAuth = [self.delegate oauthCoordinatorRetryAuthenticationOnApplicationDidBecomeActive:self];
-    }
-    
-    if (retryAuth) {
-        [self beginNativeBrowserFlow];
-    }
+    SFSafariViewController *svc = [[SFSafariViewController alloc] initWithURL:nativeBrowserUrl];
+    svc.delegate = self;
+    self.advancedAuthState = SFOAuthAdvancedAuthStateBrowserRequestInitiated;
+    [self.delegate oauthCoordinator:self didBeginAuthenticationWithSafariViewController:svc];
 }
 
 - (void)beginUserAgentFlow {
@@ -517,13 +508,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     }
     
     [self configureWebUserAgent];
-    
-    if (nil == self.view) {
-        // lazily create web view if needed
-        self.view = [[WKWebView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
-    }
 
-    [self.view setNavigationDelegate:self];
     self.initialRequestLoaded = NO;
     
     // notify delegate will be begin authentication in our (web) vew
@@ -531,70 +516,60 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
         [self.delegate oauthCoordinator:self willBeginAuthenticationWithView:self.view];
     }
     
-    // optional query params: 
-    //     state - opaque state value to be passed back
-    //     immediate - determines whether the user should be prompted for login and approval (default false)
-    
-    NSAssert(nil != self.credentials.domain, @"credentials.domain is required");
-    NSAssert(nil != self.credentials.clientId, @"credentials.clientId is required");
-    NSAssert(nil != self.credentials.redirectUri, @"credentials.redirectUri is required");
-
-    NSMutableString *approvalUrl = [[NSMutableString alloc] initWithFormat:@"%@://%@%@?%@=%@&%@=%@&%@=%@",
-                                    self.credentials.protocol, (self.credentials.instanceUrl)?self.credentials.instanceUrl:self.credentials.domain, kSFOAuthEndPointAuthorize,
-                                    kSFOAuthClientId, self.credentials.clientId,
-                                    kSFOAuthRedirectUri, self.credentials.redirectUri,
-                                    kSFOAuthDisplay, kSFOAuthDisplayTouch];
-
-    // If an activation code is available (IP bypass flow), then use the "activated client" response type.
-    if (self.credentials.activationCode) {
-        [approvalUrl appendFormat:@"&%@=%@", kSFOAuthResponseType, kSFOAuthResponseTypeActivatedClientCode];
-    } else {
-        [approvalUrl appendFormat:@"&%@=%@", kSFOAuthResponseType, kSFOAuthResponseTypeToken];        
-    }
-        
-    NSString *scopeString = [self scopeQueryParamString];
-    if (scopeString != nil) {
-        [approvalUrl appendString:scopeString];
-    }
-    
-    // JWT Flow
-    if (self.credentials.jwt && self.credentials.instanceUrl) {
-        [self swapJWTWithcompletionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
-            if (!error) {
-                bool swapOK = NO;
-                NSError *jsonError = nil;
-                id json = nil;
-                
-                json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-                if (nil == jsonError && [json isKindOfClass:[NSDictionary class]]) {
-                    NSDictionary *dict = (NSDictionary *)json;
-                    if (dict[kSFOAuthAccessToken]) {
-                        NSString *escapedString = [approvalUrl stringByURLEncoding];
-                        NSString* approvalUrl = [NSString stringWithFormat:@"%@://%@/secur/frontdoor.jsp?sid=%@&retURL=%@", self.credentials.protocol, self.credentials.instanceUrl, dict[kSFOAuthAccessToken],escapedString];
-                        [self doLoadURL:approvalUrl withCookie:YES];
-                        swapOK = YES;
-                        self.credentials.jwt = nil;
-                    }
-                }
-                if (!swapOK) {
-                    NSError *error = [[self class] errorWithType:kSFOAuthErrorTypeJWTLaunchFailed description:@"The breeze link failed to launch."];
-                    [self notifyDelegateOfFailure:error authInfo:self.authInfo];
-                    self.credentials.jwt = nil;
-                }
-            }
-            else {
-                [self log:SFLogLevelError msg:[NSString stringWithFormat:@"Fail to swap JWT for access token: %@", [error localizedDescription]]];
-                [self notifyDelegateOfFailure:error authInfo:self.authInfo];
-            }
-        }];
-    }
-    else {
-        [self doLoadURL:approvalUrl withCookie:NO];
-    }
+    NSString *approvalUrlString = [self generateApprovalUrlString];
+    [self loadWebViewWithUrlString:approvalUrlString cookie:NO];
 }
 
+- (void)beginJwtTokenExchangeFlow {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self beginJwtTokenExchangeFlow];
+        });
+        return;
+    }
+    NSAssert(self.credentials.jwt.length > 0, @"JWT token should be present at this point.");
+    [self swapJWTWithCompletionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+        if (error != nil) {
+            [SFSDKCoreLogger e:[self class] format:@"Fail to swap JWT for access token: %@", error.localizedDescription];
+            [self notifyDelegateOfFailure:error authInfo:self.authInfo];
+            return;
+        }
+        self.credentials.jwt = nil;
+        NSError *jsonError = nil;
+        id json = nil;
+        json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+        if (jsonError != nil) {
+            NSError *error = [[self class] errorWithType:kSFOAuthErrorTypeJWTLaunchFailed
+                                                 description:@"Error parsing JWT token exchange response."
+                                             underlyingError:jsonError];
+                [self notifyDelegateOfFailure:error authInfo:self.authInfo];
+            return;
+        }
+        if (![json isKindOfClass:[NSDictionary class]]) {
+            NSString *errorDesc = [NSString stringWithFormat:@"Expected NSDictionary for JWT token response, received %@ instance.", NSStringFromClass([json class])];
+                NSError *error = [[self class] errorWithType:kSFOAuthErrorTypeJWTLaunchFailed
+                                                 description:errorDesc];
+            [self notifyDelegateOfFailure:error authInfo:self.authInfo];
+            return;
+        }
+        NSDictionary *dict = (NSDictionary *)json;
+        if (nil != dict[kSFOAuthError]) {
+            NSError *error = [[self class] errorWithType:dict[kSFOAuthError] description:dict[kSFOAuthErrorDescription]];
+            [self notifyDelegateOfFailure:error authInfo:self.authInfo];
+            return;
+        }
+        [self updateCredentials:dict];
+        if (self.credentials.accessToken && self.credentials.apiUrl) {
+            NSString *baseUrlString = [self.credentials.apiUrl absoluteString];
+            NSString *approvalUrlString = [self generateApprovalUrlString];
+            NSString *escapedApprovalUrlString = [approvalUrlString stringByURLEncoding];
+            NSString *frontDoorUrlString = [NSString stringWithFormat:@"%@/secur/frontdoor.jsp?sid=%@&retURL=%@", baseUrlString, self.credentials.accessToken, escapedApprovalUrlString];
+            [self loadWebViewWithUrlString:frontDoorUrlString cookie:YES];
+        }
+    }];
+}
 
-- (void)swapJWTWithcompletionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler  {
+- (void)swapJWTWithCompletionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler  {
     NSString *url = [[NSString alloc] initWithFormat:@"%@://%@%@", self.credentials.protocol,
                      self.credentials.domain,
                      kSFOAuthEndPointToken];
@@ -611,16 +586,15 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     [[self.session dataTaskWithRequest:request completionHandler:completionHandler] resume];
 }
 
-- (void)doLoadURL:(NSString*)approvalUrl  withCookie:(BOOL)enableCookie {
-    if (self.credentials.logLevel < kSFOAuthLogLevelInfo) {
-        [self log:SFLogLevelDebug format:@"SFOAuthCoordinator:beginUserAgentFlow with %@", approvalUrl];
-    }
-    
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:approvalUrl]];
+- (void)loadWebViewWithUrlString:(NSString *)urlString cookie:(BOOL)enableCookie {
+    NSURL *urlToLoad = [NSURL URLWithString:urlString];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:urlToLoad];
     [request setHTTPShouldHandleCookies:enableCookie];
     [request setCachePolicy:NSURLRequestReloadIgnoringLocalCacheData]; // don't use cache
-    
-    [self.view loadRequest:request];
+    [SFSDKCoreLogger d:[self class] format:@"%@ Loading web view for '%@' auth flow, with URL: %@", NSStringFromSelector(_cmd), self.authInfo.authTypeDescription, [urlToLoad redactedAbsoluteString:@[ @"sid" ]]];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.view loadRequest:request];
+    });
 }
 
 - (void)beginTokenEndpointFlow:(SFOAuthTokenEndpointFlow)flowType {
@@ -648,14 +622,9 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
                                kSFOAuthClientId, self.credentials.clientId];
     NSMutableString *logString = [NSMutableString stringWithString:params];
     
-    // If an activation code is available (IP bypass flow), then provide the activation code in the request
-    if (self.credentials.activationCode) {
-        [params appendFormat:@"&%@=%@", kSFOAuthResponseClientSecret, self.credentials.activationCode];
-    }
-    
-    // If there is an approval code (IP bypass flow or Advanced Auth flow), use it once to get the tokens.
+    // If there is an approval code (Advanced Auth flow), use it once to get the tokens.
     if (self.approvalCode) {
-        [self log:SFLogLevelInfo format:@"%@: Initiating authorization code flow.", NSStringFromSelector(_cmd)];
+        [SFSDKCoreLogger i:[self class] format:@"%@: Initiating authorization code flow.", NSStringFromSelector(_cmd)];
         [params appendFormat:@"&%@=%@&%@=%@", kSFOAuthGrantType, kSFOAuthGrantTypeAuthorizationCode, kSFOAuthApprovalCode, self.approvalCode];
         [logString appendFormat:@"&%@=%@&%@=REDACTED", kSFOAuthGrantType, kSFOAuthGrantTypeAuthorizationCode, kSFOAuthApprovalCode];
         
@@ -665,38 +634,34 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
         if (self.authInfo.authType == SFOAuthTypeAdvancedBrowser) {
             [params appendFormat:@"&%@=%@", kSFOAuthCodeVerifierParamName, self.codeVerifier];
             [logString appendFormat:@"&%@=REDACTED", kSFOAuthCodeVerifierParamName];
-            [params appendFormat:@"&%@=%@", kSFOAuthResponseClientSecret, kSFOAuthClientSecretAnonymous];
         }
         
         // Discard the approval code.
         self.approvalCode = nil;
     } else {
         // Assume Refresh token flow.
-        [self log:SFLogLevelInfo format:@"%@: Initiating refresh token flow.", NSStringFromSelector(_cmd)];
+        [SFSDKCoreLogger i:[self class] format:@"%@: Initiating refresh token flow.", NSStringFromSelector(_cmd)];
         [params appendFormat:@"&%@=%@&%@=%@", kSFOAuthGrantType, kSFOAuthGrantTypeRefreshToken, kSFOAuthRefreshToken, self.credentials.refreshToken];
-        [logString appendFormat:@"&%@=%@&%@=REDACTED", kSFOAuthGrantType, kSFOAuthGrantTypeRefreshToken, kSFOAuthRefreshToken];
+        [logString appendFormat:@"&%@=%@&%@=REDACTED", kSFOAuthGrantType, kSFOAuthGrantTypeRefreshToken, kSFOAuthRefreshToken ];
+        for(NSString * key in self.additionalTokenRefreshParams) {
+            [params appendFormat:@"&%@=%@", [key stringByURLEncoding], [self.additionalTokenRefreshParams[key] stringByURLEncoding]];
+        }
     }
-    
-    if (self.credentials.logLevel < kSFOAuthLogLevelInfo) {
-        [self log:SFLogLevelDebug format:@"%@ with %@", NSStringFromSelector(_cmd), logString];
-    }
-    
+    [SFSDKCoreLogger d:[self class] format:@"%@ with %@", NSStringFromSelector(_cmd), logString];
     NSData *encodedBody = [params dataUsingEncoding:NSUTF8StringEncoding];
     [request setHTTPBody:encodedBody];
-    
-    // We set the timeout value for NSMutableURLRequest above, but NSMutableURLRequest has its own ideas
-    // about managing the timeout value (see https://devforums.apple.com/thread/25282).  So we manage
-    // the timeout with an NSTimer, which gets started here.
-    [self startRefreshFlowConnectionTimer];
-    
     [[self.session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
             NSURL *requestUrl = [request URL];
             NSString *errorUrlString = [NSString stringWithFormat:@"%@://%@%@", [requestUrl scheme], [requestUrl host], [requestUrl relativePath]];
-            [self log:SFLogLevelDebug format:@"SFOAuthCoordinator session failed with error: error code: %ld, description: %@, URL: %@", (long)error.code, [error localizedDescription], errorUrlString];
-            [self stopRefreshFlowConnectionTimer];
+            if(error.code == NSURLErrorTimedOut) {
+                [SFSDKCoreLogger d:[self class] format:@"Refresh attempt timed out after %f seconds.", self.timeout];
+                [self stopAuthentication];
+                error = [[self class] errorWithType:kSFOAuthErrorTypeTimeout
+                                        description:@"The token refresh process timed out."];
+            }
+            [SFSDKCoreLogger d:[self class] format:@"SFOAuthCoordinator session failed with error: error code: %ld, description: %@, URL: %@", (long)error.code, [error localizedDescription], errorUrlString];
             [self notifyDelegateOfFailure:error authInfo:self.authInfo];
-            
             return;
         }
         // reset the response data for a new refresh response
@@ -718,12 +683,10 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
         { "error":"invalid_grant","error_description":"authentication failure - Invalid Password" }
  */
 - (void)handleTokenEndpointResponse:(NSMutableData *) data {
-    [self stopRefreshFlowConnectionTimer];
     self.responseData = data;
     NSString *responseString = [[NSString alloc] initWithData:self.responseData encoding:NSUTF8StringEncoding];
     NSError *jsonError = nil;
     id json = nil;
-
     json = [NSJSONSerialization JSONObjectWithData:self.responseData options:0 error:&jsonError];
     if (nil == jsonError && [json isKindOfClass:[NSDictionary class]]) {
         NSDictionary *dict = (NSDictionary *)json;
@@ -737,14 +700,12 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
             } else {
                 // In a non-IP flow, we already have the refresh token here.
             }
-
             [self updateCredentials:dict];
-            
             [self notifyDelegateOfSuccess:self.authInfo];
         }
     } else {
         // failed to parse JSON
-        [self log:SFLogLevelDebug format:@"%@: JSON parse error: %@", NSStringFromSelector(_cmd), jsonError];
+        [SFSDKCoreLogger d:[self class] format:@"%@: JSON parse error: %@", NSStringFromSelector(_cmd), jsonError];
         NSError *error = [[self class] errorWithType:kSFOAuthErrorTypeMalformedResponse description:@"failed to parse response JSON"];
         NSMutableDictionary *errorDict = [NSMutableDictionary dictionaryWithDictionary:jsonError.userInfo];
         if (responseString) {
@@ -759,7 +720,6 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
 }
 
 - (void)handleUserAgentResponse:(NSURL *)requestUrl {
-    
     NSString *response = nil;
     
     // Check for a response in the URL fragment first, then fall back to the query string.
@@ -768,36 +728,24 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     } else if ([requestUrl query]) {
         response = [requestUrl query];
     } else {
-        [self log:SFLogLevelDebug format:@"%@ Error: response has no payload: %@", NSStringFromSelector(_cmd), requestUrl];
-        
+        [SFSDKCoreLogger d:[self class] format:@"%@ Error: response has no payload: %@", NSStringFromSelector(_cmd), requestUrl];
         NSError *error = [[self class] errorWithType:kSFOAuthErrorTypeMalformedResponse description:@"redirect response has no payload"];
         [self notifyDelegateOfFailure:error authInfo:self.authInfo];
         response = nil;
     }
-    
     if (response) {
         NSDictionary *params = [[self class] parseQueryString:response];
         NSString *error = params[kSFOAuthError];
         if (nil == error) {
             [self updateCredentials:params];
-            
             self.credentials.refreshToken   = params[kSFOAuthRefreshToken];
-            
-            self.approvalCode = params[kSFOAuthApprovalCode];
-            if (self.approvalCode) {
-                // If there is an approval code, then proceed to get the access/refresh token (IP bypass flow).
-                [self.oauthCoordinatorFlow beginTokenEndpointFlow:SFOAuthTokenEndpointFlowIPBypass];
-            } else {
-                // Otherwise, we are done with the authentication.
-                [self notifyDelegateOfSuccess:self.authInfo];
-            }
+            [self notifyDelegateOfSuccess:self.authInfo];
         } else {
             NSError *finalError;
             NSError *error = [[self class] errorWithType:params[kSFOAuthError]
                                              description:params[kSFOAuthErrorDescription]];
             
             // add any additional relevant info to the userInfo dictionary
-            
             if (kSFOAuthErrorInvalidClientId == error.code) {
                 NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:error.userInfo];
                 dict[kSFOAuthClientId] = self.credentials.clientId;
@@ -810,11 +758,28 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     }
 }
 
-- (NSString *)scopeQueryParamString
-{
+- (NSString *)generateApprovalUrlString {
+    NSAssert(nil != self.credentials.domain, @"credentials.domain is required");
+    NSAssert(nil != self.credentials.clientId, @"credentials.clientId is required");
+    NSAssert(nil != self.credentials.redirectUri, @"credentials.redirectUri is required");
+    NSMutableString *approvalUrlString = [[NSMutableString alloc] initWithFormat:@"%@://%@%@?%@=%@&%@=%@&%@=%@",
+                                          self.credentials.protocol, self.credentials.domain, [self brandedAuthorizeURL],
+                                          kSFOAuthClientId, self.credentials.clientId,
+                                          kSFOAuthRedirectUri, self.credentials.redirectUri,
+                                          kSFOAuthDisplay, kSFOAuthDisplayTouch];
+    
+    [approvalUrlString appendFormat:@"&%@=%@", kSFOAuthResponseType, kSFOAuthResponseTypeToken];
+    NSString *scopeString = [self scopeQueryParamString];
+    if (scopeString != nil) {
+        [approvalUrlString appendString:scopeString];
+    }
+    return approvalUrlString;
+}
+
+- (NSString *)scopeQueryParamString {
     NSMutableSet *scopes = (self.scopes.count > 0 ? [NSMutableSet setWithSet:self.scopes] : [NSMutableSet set]);
     [scopes addObject:kSFOAuthRefreshToken];
-    NSString *scopeStr = [[[scopes allObjects] componentsJoinedByString:@" "] stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSString *scopeStr = [[[scopes allObjects] componentsJoinedByString:@" "] stringByURLEncoding];
     return [NSString stringWithFormat:@"&%@=%@", kSFOAuthScope, scopeStr];
 }
 
@@ -827,47 +792,56 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
  - communityId
  - communityUrl
  */
+- (void) updateCredentials:(NSDictionary *) params {
 
-- (void)updateCredentials:(NSDictionary*)params {
-    self.credentials.accessToken    = [params objectForKey:kSFOAuthAccessToken];
-    self.credentials.issuedAt       = [[self class] timestampStringToDate:[params objectForKey:kSFOAuthIssuedAt]];
-    self.credentials.instanceUrl    = [NSURL URLWithString:[params objectForKey:kSFOAuthInstanceUrl]];
-    self.credentials.identityUrl    = [NSURL URLWithString:[params objectForKey:kSFOAuthId]];
+    if (params[kSFOAuthAccessToken]) {
+        [self.credentials setPropertyForKey:@"accessToken" withValue:params[kSFOAuthAccessToken]];
+    }
 
-    NSString *communityId = [params objectForKey:kSFOAuthCommunityId];
-    if (nil != communityId) {
-        self.credentials.communityId = communityId;
+    if (params[kSFOAuthIssuedAt]) {
+        self.credentials.issuedAt = [[self class] timestampStringToDate:params[kSFOAuthIssuedAt]];
     }
-    
-    NSString *communityUrl = [params objectForKey:kSFOAuthCommunityUrl];
-    if (nil != communityUrl) {
-        self.credentials.communityUrl = [NSURL URLWithString:communityUrl];
+
+    if (params[kSFOAuthInstanceUrl]) {
+         [self.credentials setPropertyForKey:@"instanceUrl" withValue:[NSURL URLWithString:params[kSFOAuthInstanceUrl]]];
     }
-    
+
+    if (params[kSFOAuthId]) {
+        [self.credentials setPropertyForKey:@"identityUrl" withValue:[NSURL URLWithString:params[kSFOAuthId]]];
+    }
+
+    if (params[kSFOAuthCommunityId]) {
+        [self.credentials setPropertyForKey:@"communityId" withValue:params[kSFOAuthCommunityId]];
+    }
+
+    if (params[kSFOAuthCommunityUrl]) {
+        [self.credentials setPropertyForKey:@"communityUrl" withValue:[NSURL URLWithString:params[kSFOAuthCommunityUrl]]];
+    }
+
     // Parse additional flags
     if(self.additionalOAuthParameterKeys.count > 0) {
         NSMutableDictionary * parsedValues = [NSMutableDictionary dictionaryWithCapacity:self.additionalOAuthParameterKeys.count];
         for(NSString * key in self.additionalOAuthParameterKeys) {
-            id obj = [params objectForKey:key];
+            id obj = params[key];
             if(obj) {
-                [parsedValues setObject:obj forKey:key];
+                parsedValues[key] = obj;
             }
         }
-        
         self.credentials.additionalOAuthFields = parsedValues;
     }
+
 }
 
 - (void)configureWebUserAgent
 {
     if (self.userAgentForAuth != nil) {
-        NSString *origWebUserAgent = [[NSUserDefaults standardUserDefaults] objectForKey:kOAuthUserAgentUserDefaultsKey];
+        NSString *origWebUserAgent = [[NSUserDefaults msdkUserDefaults] objectForKey:kOAuthUserAgentUserDefaultsKey];
         if (origWebUserAgent != nil) {
             self.origWebUserAgent = origWebUserAgent;
         }
         
         NSDictionary *userAgentDict = @{ kOAuthUserAgentUserDefaultsKey: self.userAgentForAuth };
-        [[NSUserDefaults standardUserDefaults] registerDefaults:userAgentDict];
+        [[NSUserDefaults msdkUserDefaults] registerDefaults:userAgentDict];
     }
 }
 
@@ -876,54 +850,12 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     if (self.userAgentForAuth != nil) {
         // If the current web user agent has not changed from the one we set, reset it.  Otherwise, assume it's
         // already been altered out of band, and we shouldn't touch it.
-        NSString *currentWebUserAgent = [[NSUserDefaults standardUserDefaults] objectForKey:kOAuthUserAgentUserDefaultsKey];
+        NSString *currentWebUserAgent = [[NSUserDefaults msdkUserDefaults] objectForKey:kOAuthUserAgentUserDefaultsKey];
         if ([currentWebUserAgent isEqualToString:self.userAgentForAuth] && self.origWebUserAgent != nil) {
             NSDictionary *userAgentDict = @{ kOAuthUserAgentUserDefaultsKey: self.origWebUserAgent };
-            [[NSUserDefaults standardUserDefaults] registerDefaults:userAgentDict];
+            [[NSUserDefaults msdkUserDefaults] registerDefaults:userAgentDict];
         }
     }
-}
-
-- (void)startRefreshFlowConnectionTimer
-{
-    self.refreshTimerThread = [NSThread currentThread];
-    self.refreshFlowConnectionTimer = [NSTimer scheduledTimerWithTimeInterval:self.timeout
-                                                                       target:self
-                                                                     selector:@selector(refreshFlowConnectionTimerFired:)
-                                                                     userInfo:nil
-                                                                      repeats:NO];
-}
-
-- (void)stopRefreshFlowConnectionTimer
-{
-    if (self.refreshFlowConnectionTimer != nil && self.refreshTimerThread != nil) {
-        [self performSelector:@selector(invalidateRefreshTimer) onThread:self.refreshTimerThread withObject:nil waitUntilDone:YES];
-        [self cleanupRefreshTimer];
-    }
-}
-
-- (void)invalidateRefreshTimer
-{
-    [self.refreshFlowConnectionTimer invalidate];
-}
-
-- (void)cleanupRefreshTimer
-{
-    self.refreshFlowConnectionTimer = nil;
-    self.refreshTimerThread = nil;
-}
-
-- (void)refreshFlowConnectionTimerFired:(NSTimer *)rfcTimer
-{
-    // If this timer fired, the timeout period for the refresh flow has expired, without the
-    // refresh flow completing.
-    
-    [self cleanupRefreshTimer];
-    [self log:SFLogLevelDebug format:@"Refresh attempt timed out after %f seconds.", self.timeout];
-    [self stopAuthentication];
-    NSError *error = [[self class] errorWithType:kSFOAuthErrorTypeTimeout
-                                     description:@"The token refresh process timed out."];
-    [self notifyDelegateOfFailure:error authInfo:self.authInfo];
 }
 
 + (NSString *)advancedAuthStateDesc:(SFOAuthAdvancedAuthState)authState
@@ -944,21 +876,22 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
 
 - (NSURLSession*)session {
     if (_session == nil) {
-        _session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration ephemeralSessionConfiguration]];
+        SFNetwork *network = [[SFNetwork alloc] init];
+        _session = network.activeSession;
     }
     return _session;
 }
 
 #pragma mark - WKNavigationDelegate (User-Agent Token Flow)
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
-
     NSURL *url = navigationAction.request.URL;
     NSString *requestUrl = [url absoluteString];
     if ([self isRedirectURL:requestUrl]) {
         [self handleUserAgentResponse:url];
         decisionHandler(WKNavigationActionPolicyCancel);
+    } else {
+        decisionHandler(WKNavigationActionPolicyAllow);
     }
-    decisionHandler(WKNavigationActionPolicyAllow);
 }
 
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationResponse:(WKNavigationResponse *)navigationResponse decisionHandler:(void (^)(WKNavigationResponsePolicy))decisionHandler {
@@ -966,13 +899,8 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
 }
 
 - (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {
-
-    NSURL *url = [webView URL];  //.request.URL;
-
-    if (self.credentials.logLevel < kSFOAuthLogLevelWarning) {
-        [self log:SFLogLevelDebug format:@"%@ host=%@ : path=%@", NSStringFromSelector(_cmd), url.host, url.path];
-    }
-
+    NSURL *url = [webView URL];
+    [SFSDKCoreLogger i:[self class] format:@"%@ host=%@ : path=%@", NSStringFromSelector(_cmd), url.host, url.path];
     if ([self.delegate respondsToSelector:@selector(oauthCoordinator:didStartLoad:)]) {
         [self.delegate oauthCoordinator:self didStartLoad:webView];
     }
@@ -1000,7 +928,7 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
 
 - (BOOL) isRedirectURL:(NSString *) requestUrlString
 {
-    return [[requestUrlString lowercaseString] hasPrefix:[self.credentials.redirectUri lowercaseString]];
+    return (self.credentials.redirectUri && [[requestUrlString lowercaseString] hasPrefix:[self.credentials.redirectUri lowercaseString]]);
 }
 
 - (void)sfwebView:(WKWebView *)webView didFailLoadWithError:(NSError *)error
@@ -1023,16 +951,50 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
     [self.delegate oauthCoordinator:self didBeginAuthenticationWithView:self.view];
     if (-999 == error.code) {
         // -999 errors (operation couldn't be completed) occur during normal execution, therefore only log for debugging
-        if (self.credentials.logLevel < kSFOAuthLogLevelInfo) {
-            [self log:SFLogLevelDebug format:@"SFOAuthCoordinator:didFailLoadWithError: error code: %ld, description: %@, URL: %@", (long)error.code, [error localizedDescription], errorUrlString];
-        }
+        [SFSDKCoreLogger d:[self class] format:@"SFOAuthCoordinator:didFailLoadWithError: error code: %ld, description: %@, URL: %@", (long)error.code, [error localizedDescription], errorUrlString];
     } else {
-        [self log:SFLogLevelDebug format:@"SFOAuthCoordinator:didFailLoadWithError: error code: %ld, description: %@, URL: %@", (long)error.code, [error localizedDescription], errorUrlString];
+        [SFSDKCoreLogger d:[self class] format:@"SFOAuthCoordinator:didFailLoadWithError: error code: %ld, description: %@, URL: %@", (long)error.code, [error localizedDescription], errorUrlString];
         [self notifyDelegateOfFailure:error authInfo:self.authInfo];
     }
-
 }
 
+#pragma mark - WKUIDelegate
+- (void)webView:(WKWebView *)webView runJavaScriptAlertPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(void))completionHandler {
+    if ([self.delegate respondsToSelector:@selector(oauthCoordinator:displayAlertMessage:completion:)]) {
+        [self.delegate oauthCoordinator:self displayAlertMessage:message completion:completionHandler];
+    } else {
+        [SFSDKCoreLogger w:[self class] format:@"WKWebView did want to display an alert but no delegate responded to it"];
+    }
+}
+
+- (void)webView:(WKWebView *)webView runJavaScriptConfirmPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(BOOL result))completionHandler {
+    if ([self.delegate respondsToSelector:@selector(oauthCoordinator:displayAlertMessage:completion:)]) {
+        [self.delegate oauthCoordinator:self displayConfirmationMessage:message completion:completionHandler];
+    } else {
+        [SFSDKCoreLogger w:[self class] format:@"WKWebView did want to display a confirmation alert but no delegate responded to it"];
+    }
+}
+
+#pragma mark - SFSafariViewControllerDelegate
+-(void)safariViewControllerDidFinish:(SFSafariViewController *)controller {
+    [self.delegate oauthCoordinatorDidCancelBrowserAuthentication:self];
+}
+
+- (NSString *)brandedAuthorizeURL{
+    NSMutableString *brandedAuthorizeURL = [NSMutableString stringWithFormat:@"%@",kSFOAuthEndPointAuthorize];
+    if (self.brandLoginPath && ![self.brandLoginPath isEmptyOrWhitespaceAndNewlines]) {
+        NSMutableString *urlString = [NSMutableString stringWithString:self.brandLoginPath];
+        // get rid of leading and trailing slash
+        if ([urlString hasPrefix:@"/"])
+            [urlString deleteCharactersInRange:NSMakeRange(0, 1)];
+
+        if ([urlString hasSuffix:@"/"])
+            [urlString deleteCharactersInRange:NSMakeRange(urlString.length - 1, 1)];
+
+        [brandedAuthorizeURL appendFormat:@"/%@",urlString];
+    }
+    return brandedAuthorizeURL;
+}
 #pragma mark - Utilities
 
 + (NSDictionary *)parseQueryString:(NSString *)query {
@@ -1059,6 +1021,10 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
 }
 
 + (NSError *)errorWithType:(NSString *)type description:(NSString *)description {
+    return [self errorWithType:type description:description underlyingError:nil];
+}
+
++ (NSError *)errorWithType:(NSString *)type description:(NSString *)description underlyingError:(NSError *)underlyingError {
     NSAssert(type, @"error type can't be nil");
     
     NSInteger code = kSFOAuthErrorUnknown;
@@ -1096,9 +1062,12 @@ static NSString * const kOAuthUserAgentUserDefaultsKey          = @"UserAgent";
         code = kSFOAuthErrorJWTInvalidGrant;
     }
 
-    NSDictionary *dict = @{kSFOAuthError: type,
-                                                                    NSLocalizedDescriptionKey: description};
-    NSError *error = [NSError errorWithDomain:kSFOAuthErrorDomain code:code userInfo:dict];
+    NSMutableDictionary *userInfoDict = [NSMutableDictionary dictionaryWithDictionary:@{kSFOAuthError: type,
+                                                                                        NSLocalizedDescriptionKey: description}];
+    if (underlyingError != nil) {
+        userInfoDict[NSUnderlyingErrorKey] = underlyingError;
+    }
+    NSError *error = [NSError errorWithDomain:kSFOAuthErrorDomain code:code userInfo:userInfoDict];
     return error;
 }
 

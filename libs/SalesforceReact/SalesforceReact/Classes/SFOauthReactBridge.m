@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2015, salesforce.com, inc. All rights reserved.
+ Copyright (c) 2015-present, salesforce.com, inc. All rights reserved.
  
  Redistribution and use of this software in source and binary forms, with or without modification,
  are permitted provided that the following conditions are met:
@@ -23,9 +23,7 @@
  */
 
 #import "SFOauthReactBridge.h"
-
-#import "RCTUtils.h"
-
+#import <React/RCTUtils.h>
 #import <SalesforceSDKCore/SFAuthenticationManager.h>
 #import <SalesforceSDKCore/SalesforceSDKManager.h>
 
@@ -46,23 +44,24 @@ RCT_EXPORT_MODULE();
 
 RCT_EXPORT_METHOD(getAuthCredentials:(NSDictionary *)args callback:(RCTResponseSenderBlock)callback)
 {
-    [self log:SFLogLevelDebug format:@"getAuthCredentials: arguments: %@", args];
-    [self sendAuthCredentials:callback];
+    [SFSDKReactLogger d:[self class] format:[NSString stringWithFormat:@"getAuthCredentials: arguments: %@", args]];
+    [self getAuthCredentialsWithCallback:callback];
 }
 
 RCT_EXPORT_METHOD(logoutCurrentUser:(NSDictionary *)args callback:(RCTResponseSenderBlock)callback)
 {
-    [self log:SFLogLevelDebug format:@"logoutCurrentUser: arguments: %@", args];
+    [SFSDKReactLogger d:[self class] format:[NSString stringWithFormat:@"logoutCurrentUser: arguments: %@", args]];
     dispatch_async(dispatch_get_main_queue(), ^{
         [[SFAuthenticationManager sharedManager] logout];
-    });    
+    });
 }
 
 RCT_EXPORT_METHOD(authenticate:(NSDictionary *)args callback:(RCTResponseSenderBlock)callback)
 {
-    [self log:SFLogLevelDebug format:@"authenticate: arguments: %@", args];
+    [SFSDKReactLogger d:[self class] format:[NSString stringWithFormat:@"authenticate: arguments: %@", args]];
     dispatch_async(dispatch_get_main_queue(), ^{
-        [[SFAuthenticationManager sharedManager] loginWithCompletion:^(SFOAuthInfo *authInfo) {
+        [[SFAuthenticationManager sharedManager] loginWithCompletion:^(SFOAuthInfo *authInfo,SFUserAccount *userAccount) {
+            [SFUserAccountManager sharedInstance].currentUser  =  userAccount;
             [self sendAuthCredentials:callback];
         } failure:^(SFOAuthInfo *authInfo, NSError *error) {
             [self sendNotAuthenticatedError:callback];
@@ -70,7 +69,7 @@ RCT_EXPORT_METHOD(authenticate:(NSDictionary *)args callback:(RCTResponseSenderB
     });
 }
 
-- (void) sendAuthCredentials:(RCTResponseSenderBlock) callback
+- (void)sendAuthCredentials:(RCTResponseSenderBlock) callback
 {
     SFOAuthCredentials *creds = [SFAuthenticationManager sharedManager].coordinator.credentials;
     if (nil != creds) {
@@ -86,14 +85,27 @@ RCT_EXPORT_METHOD(authenticate:(NSDictionary *)args callback:(RCTResponseSenderB
                                           kInstanceUrlCredentialsDictKey: instanceUrl,
                                           kUserAgentCredentialsDictKey: uaString};
         callback(@[[NSNull null], credentialsDict]);
-    }
-    else {
+    } else {
         [self sendNotAuthenticatedError:callback];
     }
 }
 
-- (void) sendNotAuthenticatedError:(RCTResponseSenderBlock) callback {
+- (void)sendNotAuthenticatedError:(RCTResponseSenderBlock) callback
+{
     callback(@[RCTMakeError(@"Not authenticated", nil, nil)]);
+}
+
+- (void)getAuthCredentialsWithCallback:(RCTResponseSenderBlock) callback
+{
+    SFOAuthCredentials *creds = [SFAuthenticationManager sharedManager].coordinator.credentials;
+    NSString *accessToken = creds.accessToken;
+    
+    // If access token is not present, authenticate first. Otherwise, send current credentials.
+    if (accessToken) {
+        [self sendAuthCredentials:callback];
+    } else {
+        [self authenticate:nil callback:callback];
+    }
 }
 
 @end
