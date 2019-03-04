@@ -11,7 +11,7 @@
  * Neither the name of salesforce.com, inc. nor the names of its contributors may be used to
  endorse or promote products derived from this software without specific prior written
  permission of salesforce.com, inc.
- 
+                
  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
  IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
  FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
@@ -24,8 +24,8 @@
 
 #import <XCTest/XCTest.h>
 #import <SalesforceSDKCore/SFUserAccountManager.h>
-#import <SmartStore/SFSmartStore.h>
-#import "SFSmartSyncSyncManager.h"
+#import <SmartStore/SmartStore.h>
+#import <SmartSync/SmartSync.h>
 
 #define ACCOUNTS_SOUP       @"accounts"
 #define ACCOUNT_TYPE        @"Account"
@@ -46,14 +46,14 @@
 #define REMOTELY_UPDATED    @"_r_upd"
 #define LOCALLY_UPDATED     @"_l_upd"
 
-
-
-
 @interface SyncManagerTestCase : XCTestCase
 
 @property (nonatomic, strong) SFUserAccount* currentUser;
 @property (nonatomic, strong) SFSmartSyncSyncManager* syncManager;
 @property (nonatomic, strong) SFSmartStore* store;
+@property (nonatomic, strong) SFSmartSyncSyncManager* globalSyncManager;
+@property (nonatomic, strong) SFSmartStore* globalStore;
+
 
 - (NSString *)createRecordName:(NSString *)objectType;
 - (NSString *)createAccountName;
@@ -67,6 +67,8 @@
 - (void)createContactsSoup;
 - (void)dropContactsSoup;
 
+- (void)deleteSyncs;
+
 - (NSArray *) buildFieldsMapForRecords:(NSUInteger)count objectType:(NSString*)objectType additionalFields:(NSDictionary*)additionalFields;
 - (NSDictionary *)createAccountsOnServer:(NSUInteger)count;
 
@@ -79,9 +81,14 @@
 
 - (void)checkStatus:(SFSyncState *)sync expectedType:(SFSyncStateSyncType)expectedType expectedId:(NSInteger)expectedId expectedTarget:(SFSyncTarget *)expectedTarget expectedOptions:(SFSyncOptions *)expectedOptions expectedStatus:(SFSyncStateStatus)expectedStatus expectedProgress:(NSInteger)expectedProgress expectedTotalSize:(NSInteger)expectedTotalSize;
 - (void)checkStatus:(SFSyncState *)sync expectedType:(SFSyncStateSyncType)expectedType expectedId:(NSInteger)expectedId expectedName:(NSString *)expectedName expectedTarget:(SFSyncTarget *)expectedTarget expectedOptions:(SFSyncOptions *)expectedOptions expectedStatus:(SFSyncStateStatus)expectedStatus expectedProgress:(NSInteger)expectedProgress expectedTotalSize:(NSInteger)expectedTotalSize;
+- (void)checkDbExists:(NSString*)soupName ids:(NSArray*)ids idField:(NSString*)idField;
 - (void)checkDb:(NSDictionary *)expectedIdToFields soupName:(NSString *)soupName;
 
 - (void)checkDbStateFlags:(NSArray *)ids soupName:(NSString *)soupName expectedLocallyCreated:(bool)expectedLocallyCreated expectedLocallyUpdated:(bool)expectedLocallyUpdated expectedLocallyDeleted:(bool)expectedLocallyDeleted;
+
+- (void)checkDbSyncIdField:(NSArray *)ids soupName:(NSString *)soupName syncId:(NSNumber*)syncId;
+
+- (void)checkDbLastErrorField:(NSArray *)ids soupName:(NSString *)soupName lastErrorSubString:(NSString*)lastErrorSubString;
 
 - (NSDictionary *)makeSomeLocalChanges:(NSDictionary *)idToFields soupName:(NSString *)soupName;
 - (NSDictionary *)makeSomeLocalChanges:(NSDictionary *)idToFields soupName:(NSString *)soupName idsToUpdate:(NSArray *)idsToUpdate;
@@ -106,9 +113,16 @@
 
 - (NSDictionary *)updateRecordLocally:(NSDictionary *)fields idToUpdate:(NSString *)idToUpdate soupName:(NSString *)soupName;
 
+- (NSDictionary *)updateRecordLocally:(NSDictionary *)fields idToUpdate:(NSString *)idToUpdate soupName:(NSString*)soupName suffix:(NSString*)suffix;
+
 - (void)deleteRecordsLocally:(NSArray *)ids soupName:(NSString *)soupName;
 
 - (void)checkServerDeleted:(NSArray *)ids objectType:(NSString *)objectType;
 
 - (void)checkDbRelationshipsWithChildrenIds:(NSArray *)childrenIds expectedParentId:(NSString *)expectedParentId soupName:(NSString *)soupName idFieldName:(NSString *)idFieldName parentIdFieldName:(NSString *)parentIdFieldName;
+
+-(void) deleteAccountsLocally:(NSArray*)ids;
+-(void) updateAccountsOnServer:(NSDictionary*)idToFieldsUpdated;
+-(void) deleteAccountsOnServer:(NSArray *)ids;
+
 @end

@@ -33,7 +33,7 @@ NS_ASSUME_NONNULL_BEGIN
 typedef NS_ENUM(NSInteger, SFParentChildrenRelationshipType) {
     SFParentChildrenRelationpshipMasterDetail,
     SFParentChildrenRelationpshipLookup
-};
+} NS_SWIFT_NAME(RelationshipType);
 
 extern NSString * const kSFParentChildrenSyncTargetParent;
 extern NSString * const kSFParentChildrenSyncTargetChildren;
@@ -48,6 +48,7 @@ extern NSString * const kSFParentChildrenSyncTargetChildrenUpdateFieldlist;
 extern NSString * const kSFParentChildrenRelationshipMasterDetail;
 extern NSString * const kSFParentChildrenRelationshipLookup;
 
+NS_SWIFT_NAME(ParentChildrenSyncHelper)
 @interface SFParentChildrenSyncHelper : NSObject
 
 + (void)registerAppFeature;
@@ -60,8 +61,10 @@ extern NSString * const kSFParentChildrenRelationshipLookup;
 
 
 + (NSString*) getDirtyRecordIdsSql:(SFParentInfo*)parentInfo childrenInfo:(SFChildrenInfo*)childrenInfo parentFieldToSelect:(NSString*)parentFieldToSelect;
-+ (NSString*) getNonDirtyRecordIdsSql:(SFParentInfo*)parentInfo childrenInfo:(SFChildrenInfo*)childrenInfo parentFieldToSelect:(NSString*)parentFieldToSelect;
-+ (void)saveRecordTreesToLocalStore:(SFSmartSyncSyncManager *)syncManager target:(SFSyncTarget *)target parentInfo:(SFParentInfo *)parentInfo childrenInfo:(SFChildrenInfo *)childrenInfo recordTrees:(NSArray *)recordTrees;
+
++ (NSString *)getNonDirtyRecordIdsSql:(SFParentInfo *)parentInfo childrenInfo:(SFChildrenInfo *)childrenInfo parentFieldToSelect:(NSString *)parentFieldToSelect additionalPredicate:(NSString *)additionalPredicate;
+
++ (void)saveRecordTreesToLocalStore:(SFSmartSyncSyncManager *)syncManager target:(SFSyncTarget *)target parentInfo:(SFParentInfo *)parentInfo childrenInfo:(SFChildrenInfo *)childrenInfo recordTrees:(NSArray *)recordTrees syncId:(NSNumber *)syncId;
 + (NSArray<NSMutableDictionary*> *)getMutableChildrenFromLocalStore:(SFSmartStore *)store parentInfo:(SFParentInfo *)parentInfo childrenInfo:(SFChildrenInfo *)childrenInfo parent:(NSDictionary *)parent;
 
 + (void)deleteChildrenFromLocalStore:(SFSmartStore *)store parentInfo:(SFParentInfo *)parentInfo childrenInfo:(SFChildrenInfo *)childrenInfo parentIds:(NSArray *)parentIds;

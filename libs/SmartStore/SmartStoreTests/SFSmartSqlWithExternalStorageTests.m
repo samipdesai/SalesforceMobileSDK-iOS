@@ -27,7 +27,7 @@
 #import "SFSmartStore+Internal.h"
 #import "SFSoupIndex.h"
 #import "SFQuerySpec.h"
-#import <SalesforceSDKCore/SFJsonUtils.h>
+#import <SalesforceSDKCommon/SFJsonUtils.h>
 #import "SFSoupSpec.h"
 
 @interface SFSmartSqlWithExternalStorageTests ()
@@ -149,4 +149,15 @@
 {
     [super testSmartQueryWithSpecialFields];
 }
+
+- (void) testSmartQueryWithNullField
+{
+    [super testSmartQueryWithNullField];
+}
+
+- (void) testSmartQueryMachingBooleanInJSON1Field
+{
+    // Doesn't apply to external storage case
+}
+
 @end

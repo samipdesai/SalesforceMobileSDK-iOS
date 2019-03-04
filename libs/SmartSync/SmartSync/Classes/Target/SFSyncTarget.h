@@ -25,13 +25,15 @@
 NS_ASSUME_NONNULL_BEGIN
 
 @class SFSmartSyncSyncManager;
-
+NS_SWIFT_NAME(SyncTarget)
 @interface SFSyncTarget : NSObject
 
 extern NSString * const kSyncTargetLocal;
 extern NSString * const kSyncTargetLocallyCreated;
 extern NSString * const kSyncTargetLocallyUpdated;
 extern NSString * const kSyncTargetLocallyDeleted;
+extern NSString * const kSyncTargetSyncId;
+extern NSString * const kSyncTargetLastError;
 
 /**
  The field name of the ID field of the record.  Defaults to "Id".
@@ -63,15 +65,16 @@ extern NSString * const kSyncTargetLocallyDeleted;
  * @param soupName The soup
  * @param record The record
  */
-- (void) cleanAndSaveInLocalStore:(SFSmartSyncSyncManager*)syncManager soupName:(NSString*)soupName record:(NSDictionary*)record;
+- (void) cleanAndSaveInLocalStore:(SFSmartSyncSyncManager*)syncManager soupName:(NSString*)soupName record:(NSDictionary*)record NS_SWIFT_NAME(cleanAndSaveInLocalStore(syncManager:soupName:record:));
 
 /**
- * Save records in local store
+ * Save records in local store (marked as clean)
  * @param syncManager The sync manager
  * @param soupName The soup
  * @param records The records to save
+ * @param syncId The sync id
  */
-- (void) saveRecordsToLocalStore:(SFSmartSyncSyncManager*)syncManager soupName:(NSString*)soupName records:(NSArray*)records;
+- (void)cleanAndSaveRecordsToLocalStore:(SFSmartSyncSyncManager *)syncManager soupName:(NSString *)soupName records:(NSArray *)records syncId:(NSNumber *)syncId NS_SWIFT_NAME(cleanAndSaveRecordsToLocalStore(syncManager:soupName:records:syncId:));
 
 /**
  * @param record The record
@@ -112,7 +115,7 @@ extern NSString * const kSyncTargetLocallyDeleted;
  * @param storeId The soup entry id
  * @return Record from local store by storeId
  */
-- (NSDictionary*) getFromLocalStore:(SFSmartSyncSyncManager *)syncManager soupName:(NSString*)soupName storeId:(NSString*)storeId;
+- (NSDictionary*) getFromLocalStore:(SFSmartSyncSyncManager *)syncManager soupName:(NSString*)soupName storeId:(NSNumber*)storeId;
 
 /**
  * Delete record from local store
@@ -120,7 +123,7 @@ extern NSString * const kSyncTargetLocallyDeleted;
  * @param soupName The soup
  * @param record The record to delete
  */
-- (void) deleteFromLocalStore:(SFSmartSyncSyncManager *)syncManager soupName:(NSString*)soupName record:(NSDictionary*)record;
+- (void) deleteFromLocalStore:(SFSmartSyncSyncManager *)syncManager soupName:(NSString*)soupName record:(NSDictionary*)record NS_SWIFT_NAME(deleteFromLocalStore(syncManager:soupName:record:));
 
 @end
 

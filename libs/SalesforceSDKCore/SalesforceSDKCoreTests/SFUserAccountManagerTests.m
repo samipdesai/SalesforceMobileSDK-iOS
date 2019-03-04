@@ -23,10 +23,15 @@
  */
 
 #import <XCTest/XCTest.h>
-#import <OCMock/OCMock.h>
+#import <SalesforceSDKCommon/SFJsonUtils.h>
 #import <SalesforceSDKCore/SalesforceSDKCore.h>
+#import "SFSDKAuthViewHandler.h"
 #import "SFUserAccountManager+Internal.h"
 #import "SFDefaultUserAccountPersister.h"
+#import "SFSDKOAuthClient.h"
+#import "SFSDKOAuthClientConfig.h"
+#import "SFOAuthCredentials+Internal.h"
+
 static NSString * const kUserIdFormatString = @"005R0000000Dsl%lu";
 static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
 
@@ -55,26 +60,11 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
 - (void)dealloc {
     [[SFUserAccountManager sharedInstance] removeDelegate:self];
 }
-- (void)userAccountManager:(SFUserAccountManager *)userAccountManager willLogin:(SFOAuthCredentials *)credentials {
-    self.willLoginCredentials = credentials;
-}
 
-- (void)userAccountManager:(SFUserAccountManager *)userAccountManager willLogout:(SFUserAccount *)userAccount {
-    
-}
-
-- (void)userAccountManager:(SFUserAccountManager *)userAccountManager didLogout:(SFUserAccount *)userAccount {
-
-}
-
-- (void)userAccountManager:(SFUserAccountManager *)userAccountManager didLogin:(SFUserAccount *)userAccount {
-    self.didLoginUserAccount = userAccount;
-}
-
-- (void)userAccountManager:(SFUserAccountManager *)userAccountManager error:(NSError *)error info:(SFOAuthInfo *)info {
+- (BOOL)userAccountManager:(SFUserAccountManager *)userAccountManager error:(NSError *)error info:(SFOAuthInfo *)info {
     self.error = error;
+    return NO;
 }
-
 
 - (void)userAccountManager:(SFUserAccountManager *)userAccountManager
         willSwitchFromUser:(SFUserAccount *)fromUser
@@ -97,6 +87,9 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
 @interface SFUserAccountManagerTests : XCTestCase
 
 @property (nonatomic, strong) SFUserAccountManager *uam;
+@property (nonatomic, strong) SFSDKAuthViewHandler *authViewHandler;
+@property (nonatomic, strong) SFSDKLoginViewControllerConfig *config;
+@property (nonatomic, strong) NSString *origLoginHost;
 
 - (SFUserAccount *)createNewUserWithIndex:(NSUInteger)index;
 - (NSArray *)createAndVerifyUserAccounts:(NSUInteger)numAccounts;
@@ -106,14 +99,14 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
 @implementation SFUserAccountManagerTests
 
 - (void)setUp {
-
+    [super setUp];
     // Delete the content of the global library directory
     NSString *globalLibraryDirectory = [[SFDirectoryManager sharedManager] directoryForUser:nil type:NSLibraryDirectory components:nil];
     [[[NSFileManager alloc] init] removeItemAtPath:globalLibraryDirectory error:nil];
     // Set the oauth client ID after deleting the content of the global library directory
     // to ensure the SFUserAccountManager sharedInstance loads from an empty directory
     self.uam = [SFUserAccountManager sharedInstance];
-    
+    _origLoginHost = self.uam.loginHost;
     // Ensure the user account manager doesn't contain any account
     NSArray *userAccounts = [[SFUserAccountManager sharedInstance] allUserAccounts];
     for (SFUserAccount *account in userAccounts) {
@@ -124,8 +117,19 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
     }
     [self.uam clearAllAccountState];
     self.uam.currentUser = nil;
-    [super setUp];
+    self.uam.loginHost = nil;
+    self.uam.useBrowserAuth = NO;
+    self.authViewHandler = [SFUserAccountManager sharedInstance].authViewHandler;
+    self.config = self.uam.loginViewControllerConfig;
 }
+
+- (void)tearDown {
+    [SFUserAccountManager sharedInstance].authViewHandler = self.authViewHandler;
+    self.uam.loginViewControllerConfig = self.config;
+    self.uam.loginHost = _origLoginHost;
+    [super tearDown];
+}
+
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnonnull"
@@ -133,22 +137,10 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
 - (void)testAccountIdentityEquality {
     NSDictionary *accountIdentityMatrix = @{
                                             @"MatchGroup1": @[
-                                                    [[SFUserAccountIdentity alloc] initWithUserId:nil orgId:nil],
-                                                    [[SFUserAccountIdentity alloc] initWithUserId:nil orgId:nil]
-                                                    ],
-                                            @"MatchGroup2": @[
-                                                    [[SFUserAccountIdentity alloc] initWithUserId:nil orgId:@"OrgID1"],
-                                                    [[SFUserAccountIdentity alloc] initWithUserId:nil orgId:@"OrgID1"]
-                                                    ],
-                                            @"MatchGroup3": @[
-                                                    [[SFUserAccountIdentity alloc] initWithUserId:@"UserID1" orgId:nil],
-                                                    [[SFUserAccountIdentity alloc] initWithUserId:@"UserID1" orgId:nil]
-                                                    ],
-                                            @"MatchGroup4": @[
                                                     [[SFUserAccountIdentity alloc] initWithUserId:@"UserID1" orgId:@"OrgID1"],
                                                     [[SFUserAccountIdentity alloc] initWithUserId:@"UserID1" orgId:@"OrgID1"]
                                                     ],
-                                            @"MatchGroup5": @[
+                                            @"MatchGroup2": @[
                                                     [[SFUserAccountIdentity alloc] initWithUserId:@"UserID2" orgId:@"OrgID2"],
                                                     [[SFUserAccountIdentity alloc] initWithUserId:@"UserID2" orgId:@"OrgID2"]
                                                     ]
@@ -303,6 +295,26 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
     XCTAssertEqual(self.uam.currentUser, newUser, @"The current user should be set to newUser.");
 }
 
+- (void)testLoginHostForSwitchToUser {
+    NSArray *accounts = [self createAndVerifyUserAccounts:2];
+    SFUserAccount *origUser = accounts[0];
+    self.uam.loginHost = @"my.prev.domain";
+    SFUserAccount *newUser = accounts[1];
+    NSString *testDomain = @"my.test.domain";
+    newUser.credentials.domain = testDomain;
+    self.uam.currentUser = origUser;
+    TestUserAccountManagerDelegate *acctDelegate = [[TestUserAccountManagerDelegate alloc] init];
+    XCTAssertNotEqual(self.uam.loginHost, testDomain, @"The domains should be different before the test.");
+    XCTAssertEqual(newUser.credentials.domain, testDomain, @"User domain should have been set in the credentials.");
+    
+    [self.uam switchToUser:newUser];
+    XCTAssertEqual(acctDelegate.didSwitchOrigUserAccount, origUser, @"The user switched from is not the same user as expected.");
+    XCTAssertEqual(acctDelegate.didSwitchNewUserAccount, newUser, @"The user switched to is not the same user as expected.");
+    XCTAssertEqual(self.uam.currentUser, newUser, @"The current user should be set to the new user.");
+    XCTAssertEqual(newUser.credentials.domain, testDomain, @"Switch user should not have changed users domain in credentials.");
+    XCTAssertEqual(self.uam.loginHost, newUser.credentials.domain, @"Switch user should set current login host to users domain.");
+}
+
 - (void)testIdentityDataModification {
     NSArray *accounts = [self createAndVerifyUserAccounts:1];
     self.uam.currentUser = accounts[0];
@@ -337,13 +349,6 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
 }
 
 - (void)testUserAccountManagerPersistentProperties {
-    
-    SFOAuthAdvancedAuthConfiguration oldAdvancedAuthConfiguration = [SFUserAccountManager sharedInstance].advancedAuthConfiguration;
-    [SFUserAccountManager sharedInstance].advancedAuthConfiguration = SFOAuthAdvancedAuthConfigurationRequire;
-    XCTAssertEqual([SFUserAccountManager sharedInstance].advancedAuthConfiguration, SFOAuthAdvancedAuthConfigurationRequire, @"SFUserAccountManager advancedAuthConfiguration should be set correctly");
-    [SFUserAccountManager sharedInstance].advancedAuthConfiguration = oldAdvancedAuthConfiguration;
-    XCTAssertEqual([SFUserAccountManager sharedInstance].advancedAuthConfiguration, oldAdvancedAuthConfiguration, @"SFUserAccountManager advancedAuthConfiguration should be set back correctly");
-    
     NSArray *oldAdditionalOAuthParameterKeys = [SFUserAccountManager sharedInstance].additionalOAuthParameterKeys;
     NSArray *addlKeys = @[@"A", @"__B", @"123", @""];
     [SFUserAccountManager sharedInstance].additionalOAuthParameterKeys = addlKeys;
@@ -407,24 +412,12 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
 {
     SFOAuthCredentials *credentials = [self populateAuthCredentialsFromConfigFileForClass:self.class];
     
-    NSString *notificationName = kSFNotificationUserWillLogIn;
-    
-    id observerMock = [OCMockObject observerMock];
-    [[NSNotificationCenter defaultCenter] addMockObserver:observerMock name:notificationName object:[SFUserAccountManager sharedInstance]];
-    
-    
-    
-    __block SFSDKTestRequestListener *authListener = [[SFSDKTestRequestListener alloc] init];
     __block SFUserAccount *user = nil;
-    
-    [[observerMock expect]
-     notificationWithName:notificationName
-     object:[SFUserAccountManager sharedInstance]
-     userInfo:[OCMArg checkWithBlock:
-               ^BOOL(NSDictionary *userInfo) {
-                   return userInfo[kSFNotificationUserInfoCredentialsKey]!=nil;
-               }]];
-    
+    [self expectationForNotification:kSFNotificationUserWillLogIn object:[SFUserAccountManager sharedInstance] handler:^BOOL(NSNotification * notification) {
+        return notification.userInfo[kSFNotificationUserInfoCredentialsKey]!=nil;
+    }];
+
+    SFSDKTestRequestListener *authListener = [[SFSDKTestRequestListener alloc] init];
     [[SFUserAccountManager sharedInstance]
      refreshCredentials:credentials
      completion:^(SFOAuthInfo *authInfo, SFUserAccount *userAccount) {
@@ -435,32 +428,20 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
          authListener.returnStatus = kTestRequestStatusDidFail;
      }];
     [authListener waitForCompletion];
-    [observerMock verify];
-    
-    [[NSNotificationCenter defaultCenter] removeObserver:observerMock];
+    [self waitForExpectationsWithTimeout:10.0 handler:nil];
+    XCTAssertNotNil(user);
 }
 
 - (void)testLoginNotificationPosted
 {
     SFOAuthCredentials *credentials = [self populateAuthCredentialsFromConfigFileForClass:self.class];
     
-    NSString *notificationName = kSFNotificationUserDidLogIn;
+    [self expectationForNotification:kSFNotificationUserDidLogIn object:[SFUserAccountManager sharedInstance] handler:^BOOL(NSNotification * notification) {
+        return notification.userInfo[kSFNotificationUserInfoAccountKey]!=nil;
+    }];
     
-    id observerMock = [OCMockObject observerMock];
-    [[NSNotificationCenter defaultCenter] addMockObserver:observerMock name:notificationName object:[SFUserAccountManager sharedInstance]];
-    
-    
-    
-    __block SFSDKTestRequestListener *authListener = [[SFSDKTestRequestListener alloc] init];
+    SFSDKTestRequestListener *authListener = [[SFSDKTestRequestListener alloc] init];
     __block SFUserAccount *user = nil;
-    
-    [[observerMock expect]
-     notificationWithName:notificationName
-     object:[SFUserAccountManager sharedInstance]
-     userInfo:[OCMArg checkWithBlock:
-               ^BOOL(NSDictionary *userInfo) {
-                   return userInfo[kSFNotificationUserInfoAccountKey]!=nil;
-               }]];
     
     [[SFUserAccountManager sharedInstance]
      refreshCredentials:credentials
@@ -472,9 +453,94 @@ static NSString * const kOrgIdFormatString = @"00D000000000062EA%lu";
          authListener.returnStatus = kTestRequestStatusDidFail;
      }];
     [authListener waitForCompletion];
-    [observerMock verify];
+    [self waitForExpectationsWithTimeout:10.0 handler:nil];
+    XCTAssertNotNil(user);
+}
+
+- (void)testAuthHandler {
+    SFSDKAuthViewHandler *origAuthViewHandler = [SFUserAccountManager sharedInstance].authViewHandler;
+    XCTestExpectation *expectation = [self expectationWithDescription:@"testAuthHandler"];
+    SFSDKAuthViewHandler *authViewHandler = [[SFSDKAuthViewHandler alloc] initWithDisplayBlock:^(SFSDKAuthViewHolder *holder) {
+        [expectation fulfill];
+    } dismissBlock:^{
+        [expectation fulfill];
+    }];
+    [[SFUserAccountManager sharedInstance] setAuthViewHandler:authViewHandler];
+    XCTAssertNotNil(authViewHandler);
+    XCTAssertNotNil(authViewHandler.authViewDismissBlock);
+    XCTAssertNotNil(authViewHandler.authViewDisplayBlock);
+    XCTAssertTrue([SFUserAccountManager sharedInstance].authViewHandler == authViewHandler);
     
-    [[NSNotificationCenter defaultCenter] removeObserver:observerMock];
+    SFOAuthCredentials *credentials = [self populateAuthCredentialsFromConfigFileForClass:self.class];
+    credentials.refreshToken = nil;
+    SFSDKOAuthClient *client = [[SFUserAccountManager sharedInstance] fetchOAuthClient:credentials completion:nil failure:nil];
+    [client refreshCredentials];
+    [self waitForExpectations:[NSArray arrayWithObject:expectation] timeout:20];
+    [[SFUserAccountManager sharedInstance] disposeOAuthClient:client];
+    [SFUserAccountManager sharedInstance].authViewHandler = origAuthViewHandler;
+}
+
+- (void)testLoginViewControllerCustomizations {
+    
+    SFSDKLoginViewControllerConfig *config = [[SFSDKLoginViewControllerConfig alloc] init];
+    
+    //test defaults
+    XCTAssertNotNil(config);
+    XCTAssertNil(config.navBarFont);
+    XCTAssertNotNil(config.navBarColor);
+    XCTAssertTrue(config.showNavbar == YES);
+    XCTAssertTrue(config.showSettingsIcon == YES);
+    
+    config.navBarColor = [UIColor redColor];
+    config.navBarFont = [UIFont systemFontOfSize:10.0f];
+    config.showNavbar = NO;
+    config.showSettingsIcon = NO;
+    
+    XCTAssertTrue(config.navBarColor == [UIColor redColor], @"SFSDKLoginViewController config nav bar color should have changed" );
+    XCTAssertTrue(config.navBarFont == [UIFont systemFontOfSize:10.0f], @"SFSDKLoginViewController config nav bar font should have changed" );
+    XCTAssertFalse(config.showNavbar, @"SFSDKLoginViewController nav bar should have been disabled");
+    XCTAssertFalse(config.showSettingsIcon, @"SFSDKLoginViewController nav bar settings icon should have been disabled");
+    
+    [SFUserAccountManager sharedInstance].loginViewControllerConfig = config;
+    
+    SFOAuthCredentials *credentials = [self populateAuthCredentialsFromConfigFileForClass:self.class];
+    credentials.refreshToken = nil;
+    
+    SFSDKOAuthClient *client = [[SFUserAccountManager sharedInstance] fetchOAuthClient:credentials completion:nil failure:nil];
+    XCTAssertTrue(client.config.loginViewControllerConfig == config);
+    [[SFUserAccountManager sharedInstance] disposeOAuthClient:client];
+}
+
+- (void)testLoginViewCustomizationsBackwardCompatibility {
+    
+    SFLoginViewController *controller = [[SFLoginViewController alloc]init];
+    SFSDKLoginViewControllerConfig *origConfig = controller.config;
+    
+    controller.navBarColor = [UIColor redColor];
+    controller.navBarFont = [UIFont systemFontOfSize:10.0f];
+    controller.showNavbar = YES;
+    controller.showSettingsIcon = NO;
+    
+    
+    SFSDKLoginViewControllerConfig *config = controller.config;
+    
+    //test defaults
+    XCTAssertNotNil(config);
+   
+    XCTAssertTrue(config.navBarColor == [UIColor redColor], @"SFSDKLoginViewController config nav bar color should have changed" );
+    XCTAssertTrue(config.navBarFont == [UIFont systemFontOfSize:10.0f], @"SFSDKLoginViewController config nav bar font should have changed" );
+    XCTAssertTrue(config.showNavbar, @"SFSDKLoginViewController nav bar should have been disabled");
+    XCTAssertFalse(config.showSettingsIcon, @"SFSDKLoginViewController nav bar settings icon should have been disabled");
+    
+    [SFUserAccountManager sharedInstance].loginViewControllerConfig = config;
+    
+    SFOAuthCredentials *credentials = [self populateAuthCredentialsFromConfigFileForClass:self.class];
+    credentials.refreshToken = nil;
+    
+    SFSDKOAuthClient *client = [[SFUserAccountManager sharedInstance] fetchOAuthClient:credentials completion:nil failure:nil];
+    XCTAssertTrue(client.config.loginViewControllerConfig == config);
+    [[SFUserAccountManager sharedInstance] disposeOAuthClient:client];
+    controller.config = origConfig;
 }
 
 #pragma mark - Helper methods

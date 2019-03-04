@@ -23,7 +23,7 @@
  */
 
 #import "SFSmartStoreTests.h"
-#import <SalesforceSDKCore/SFJsonUtils.h>
+#import <SalesforceSDKCommon/SFJsonUtils.h>
 #import "FMDatabase.h"
 #import "FMDatabaseAdditions.h"
 #import "FMDatabaseQueue.h"
@@ -59,7 +59,7 @@
 - (void) setUp
 {
     [super setUp];
-    [SFSDKSmartStoreLogger setLogLevel:DDLogLevelDebug];
+    [SFSDKSmartStoreLogger setLogLevel:SFLogLevelDebug];
     self.smartStoreUser = [self setUpSmartStoreUser];
     self.store = [SFSmartStore sharedStoreWithName:kTestSmartStoreName];
     self.globalStore = [SFSmartStore sharedGlobalStoreWithName:kTestSmartStoreName];
@@ -97,13 +97,13 @@
 - (void) testSqliteVersion
 {
     NSString* version = [NSString stringWithUTF8String:sqlite3_libversion()];
-    XCTAssertEqualObjects(version, @"3.15.2");
+    XCTAssertEqualObjects(version, @"3.26.0");
 }
 
 - (void) testSqlCipherVersion
 {
     NSString* version = [self.store getSQLCipherVersion];
-    XCTAssertEqualObjects(version, @"3.4.1");
+    XCTAssertEqualObjects(version, @"4.0.1 community");
 }
 
 /**
@@ -583,6 +583,62 @@
 }
 
 /**
+ * Test query against soup with special characters when soup has string index
+ */
+-(void) testQueryDataWithSpecialCharactersWithStringIndex
+{
+    [self tryQueryDataWithSpecialCharacters:kSoupIndexTypeString];
+}
+
+/**
+ * Test query against soup with special characters when soup has json1 index
+ */
+-(void) testQueryDataWithSpecialCharactersWithJSON1Index
+{
+    [self tryQueryDataWithSpecialCharacters:kSoupIndexTypeJSON1];
+}
+
+-(void) tryQueryDataWithSpecialCharacters:(NSString*)indexType
+{
+    for (SFSmartStore *store in @[ self.store, self.globalStore ]) {
+        // Before
+        XCTAssertFalse([store soupExists:kTestSoupName], @"%@ should not exist before registration.", kTestSoupName);
+        
+        // Register
+        NSError* error = nil;
+        [store registerSoup:kTestSoupName
+             withIndexSpecs:[SFSoupIndex asArraySoupIndexes:@[@{@"path": @"key",@"type": indexType}, @{@"path": @"value",@"type": indexType}]]
+                      error:&error];
+        BOOL testSoupExists = [store soupExists:kTestSoupName];
+        XCTAssertTrue(testSoupExists, @"Soup %@ should exist after registration.", kTestSoupName);
+        XCTAssertNil(error, @"There should be no errors.");
+        
+        
+        NSMutableString* value = [NSMutableString new];
+        for (unichar i=1; i<1000; i++) {
+            [value appendFormat:@"%C", i];
+        }
+        NSString* valueForAbcd = [NSString stringWithFormat:@"abcd%@", value];
+        NSString* valueForDefg = [NSString stringWithFormat:@"defg%@", value];
+
+        // Populate soup
+        NSDictionary* soupElt0 = @{@"key": @"abcd", @"value":valueForAbcd};
+        NSDictionary* soupElt1 = @{@"key": @"defg", @"value":valueForDefg};
+        
+        /* NSArray* soupEltsCreated = */[store upsertEntries:@[soupElt0, soupElt1] toSoup:kTestSoupName];
+        
+        // Smart query
+        NSString* smartSql = [NSString stringWithFormat:@"SELECT {%1$@:value} FROM {%1$@} ORDER BY {%1$@:key}", kTestSoupName];
+        [self runQueryCheckResultsAndExplainPlan:[SFQuerySpec newSmartQuerySpec:smartSql withPageSize:10]
+                                            page:0
+                                 expectedResults:@[@[valueForAbcd], @[valueForDefg]]
+                                        covering:NO
+                             expectedDbOperation:nil
+                                           store:store];
+    }
+}
+
+/**
  * Test remove entries with ids
  */
 -(void) testRemoveEntriesByIds
@@ -762,6 +818,61 @@
 }
 
 /**
+ * Test smart sql returning entire soup elements (i.e. select {soup:_soup} from {soup})
+ */
+- (void) testSelectUnderscoreSoup
+{
+    // Create soup
+    NSError* error = nil;
+    [self.store registerSoup:kTestSoupName withIndexSpecs:[SFSoupIndex asArraySoupIndexes:@[@{@"path": @"key",@"type": kSoupIndexTypeString}]] error:&error];
+
+    // Create soup elements
+    NSDictionary* soupElt1 = @{@"key":@"ka1", @"value":@"va1"};
+    NSDictionary* soupElt2 = @{@"key":@"ka2", @"value":@"va2"};
+    NSDictionary* soupElt3 = @{@"key":@"ka3", @"value":@"va3"};
+    NSDictionary* soupElt4 = @{@"key":@"ka4", @"value":@"va4"};
+    NSArray* soupEltsCreated = [self.store upsertEntries:@[soupElt1, soupElt2, soupElt3, soupElt4] toSoup:kTestSoupName];
+    
+    // Query _soup
+    NSString* smartSql = [NSString stringWithFormat:@"SELECT {%@:_soup} FROM {%@} ORDER BY {%@:key}", kTestSoupName, kTestSoupName, kTestSoupName];
+    [self runQueryCheckResultsAndExplainPlan:[SFQuerySpec newSmartQuerySpec:smartSql withPageSize:10]
+                                        page:0
+                             expectedResults:@[@[soupEltsCreated[0]], @[soupEltsCreated[1]], @[soupEltsCreated[2]], @[soupEltsCreated[3]]]
+                                    covering:NO
+                         expectedDbOperation:@"SCAN"
+                                       store:self.store];
+}
+    
+    /**
+     * Test smart sql returning entire soup elements from multiple soups
+     */
+- (void) testSelectUnderscoreSoupFromMultipleSoups
+{
+    // Create soups
+    NSString* otherTestSoupName = @"otherTestSoup";
+    NSError* error = nil;
+    [self.store registerSoup:kTestSoupName withIndexSpecs:[SFSoupIndex asArraySoupIndexes:@[@{@"path": @"key",@"type": kSoupIndexTypeString}]] error:&error];
+    [self.store registerSoup:otherTestSoupName withIndexSpecs:[SFSoupIndex asArraySoupIndexes:@[@{@"path": @"key",@"type": @"string"}]] error:&error];
+
+
+    // Create soup elements
+    NSDictionary* soupElt1 = @{@"key":@"ka1", @"value":@"va1"};
+    NSDictionary* soupElt1Created = [self.store upsertEntries:@[soupElt1] toSoup:kTestSoupName][0];
+    
+    NSDictionary* soupElt2 = @{@"key":@"ka1", @"value":@"va1", @"otherValue":@"ova1"};
+    NSDictionary* soupElt2Created = [self.store upsertEntries:@[soupElt2] toSoup:otherTestSoupName][0];
+
+    // Query _soup from both soups
+    NSString* smartSql = [NSString stringWithFormat:@"SELECT {%@:_soup}, {%@:_soup} FROM {%@}, {%@}", kTestSoupName, otherTestSoupName, kTestSoupName, otherTestSoupName];
+    [self runQueryCheckResultsAndExplainPlan:[SFQuerySpec newSmartQuerySpec:smartSql withPageSize:10]
+                                        page:0
+                             expectedResults:@[@[soupElt1Created, soupElt2Created]]
+                                    covering:NO
+                         expectedDbOperation:nil
+                                       store:self.store];
+}
+
+/**
  * Test registering same soup name multiple times.
  */
 - (void) testMultipleRegisterSameSoup
@@ -810,40 +921,6 @@
     querySpecPageSize = querySpec.pageSize;
     XCTAssertEqual(querySpecPageSize, expectedPageSize, @"Page size value should reflect input value.");
 }
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wnonnull"
-
-- (void)testCursorTotalPages
-{
-    NSUInteger totalEntries = 50;
-    
-    // Entries divided evenly by the page size.
-    NSUInteger evenDividePageSize = 25;
-    NSUInteger expectedPageSize = totalEntries / evenDividePageSize;
-    NSDictionary *allQuery = @{kQuerySpecParamQueryType: kQuerySpecTypeRange,
-                                          kQuerySpecParamIndexPath: @"a",
-                                          kQuerySpecParamPageSize: @(evenDividePageSize)};
-    SFQuerySpec *querySpec = [[SFQuerySpec alloc] initWithDictionary:allQuery  withSoupName:kTestSoupName];
-    SFStoreCursor *cursor = [[SFStoreCursor alloc] initWithStore:nil querySpec:querySpec totalEntries:totalEntries firstPageEntries:nil];
-    XCTAssertEqual([cursor.totalEntries unsignedIntValue], totalEntries, @"Wrong value for totalEntries");
-    int cursorTotalPages = [cursor.totalPages intValue];
-    XCTAssertEqual(cursorTotalPages, expectedPageSize, @"%lu entries across a page size of %lu should make %lu total pages.", (unsigned long)totalEntries, (unsigned long)evenDividePageSize, (unsigned long)expectedPageSize);
-
-    // Entries not evenly divided across the page size.
-    NSUInteger unevenDividePageSize = 24;
-    expectedPageSize = totalEntries / unevenDividePageSize + 1;
-    allQuery = @{kQuerySpecParamQueryType: kQuerySpecTypeRange,
-                              kQuerySpecParamIndexPath: @"a",
-                              kQuerySpecParamPageSize: @(unevenDividePageSize)};
-    querySpec = [[SFQuerySpec alloc] initWithDictionary:allQuery  withSoupName:kTestSoupName];
-    cursor = [[SFStoreCursor alloc] initWithStore:nil querySpec:querySpec totalEntries:totalEntries firstPageEntries:nil];
-    XCTAssertEqual([cursor.totalEntries unsignedIntValue], totalEntries, @"Wrong value for totalEntries");
-    cursorTotalPages = [cursor.totalPages intValue];
-    XCTAssertEqual(cursorTotalPages, expectedPageSize, @"%lu entries across a page size of %lu should make %lu total pages.", (unsigned long)totalEntries, (unsigned long)unevenDividePageSize, (unsigned long)expectedPageSize);
-}
-
-#pragma clang diagnostic pop
 
 - (void)testPersistentStoreExists
 {

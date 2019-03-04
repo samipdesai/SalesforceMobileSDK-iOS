@@ -26,12 +26,12 @@
 #import "SFPushNotificationManager.h"
 #import "SFUserAccount.h"
 #import "SFOAuthCoordinator.h"
-#import "SFAuthenticationManager.h"
 #import "SFIdentityCoordinator.h"
 #import "SFUserAccountManager.h"
 #import "SFIdentityData.h"
 #import "SFPreferences.h"
-
+#import "SFUserAccount+Internal.h"
+#import "SFOAuthCredentials+Internal.h"
 // needs to match what is defined in SFPushNotificationManager
 static NSString* const kSFDeviceSalesforceId = @"deviceSalesforceId";
 
@@ -50,33 +50,42 @@ static NSString* const kSFDeviceSalesforceId = @"deviceSalesforceId";
     [super setUp];
     self.manager = [[SFPushNotificationManager alloc] init];
     self.manager.isSimulator = NO;
+    self.manager.deviceSalesforceId = @"pretending-we-registered";
     SFOAuthCredentials *credentials = [[SFOAuthCredentials alloc] initWithIdentifier:@"happy-user" clientId:[SFUserAccountManager sharedInstance].oauthClientId encrypted:YES];
     SFUserAccount *user =[[SFUserAccount alloc] initWithCredentials:credentials];
     user.credentials.identityUrl = [NSURL URLWithString:@"https://login.salesforce.com/id/00D000000000062EA0/005R0000000Dsl0"];
     [SFUserAccountManager sharedInstance].currentUser = user;
-
     self.user = user;
-
 }
 
 - (void)tearDown {
     [super tearDown];
 }
 
+- (void)testRegisterSalesforceNotifications_NoUserCredentials {
+    self.user.credentials = (SFOAuthCredentials* _Nonnull)nil;
+    BOOL result = [self.manager registerSalesforceNotificationsWithCompletionBlock:nil failBlock:nil];
+    XCTAssertFalse(result);
+}
+
+- (void)testRegisterSalesforceNotifications_NoDeviceIdPref {
+    SFPreferences *pref = [SFPreferences sharedPreferencesForScope:SFUserAccountScopeUser user:self.user];
+    [pref removeObjectForKey:kSFDeviceSalesforceId];
+    BOOL result = [self.manager registerSalesforceNotificationsWithCompletionBlock:nil failBlock:nil];
+    XCTAssertFalse(result);
+}
+
 - (void)testUnregisterSalesforceNotifications_NoUserCredentials {
     self.user.credentials = (SFOAuthCredentials* _Nonnull)nil;
-    BOOL result = [self.manager unregisterSalesforceNotifications:self.user];
+    BOOL result = [self.manager unregisterSalesforceNotificationsWithCompletionBlock:self.user completionBlock:nil];
     XCTAssertFalse(result);
 }
 
 - (void)testUnregisterSalesforceNotifications_NoDeviceIdPref {
     SFPreferences *pref = [SFPreferences sharedPreferencesForScope:SFUserAccountScopeUser user:self.user];
     [pref removeObjectForKey:kSFDeviceSalesforceId];
-
-    BOOL result = [self.manager unregisterSalesforceNotifications:self.user];
+    BOOL result = [self.manager unregisterSalesforceNotificationsWithCompletionBlock:self.user completionBlock:nil];
     XCTAssertFalse(result);
 }
-
-
 
 @end

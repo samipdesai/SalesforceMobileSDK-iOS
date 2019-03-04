@@ -36,10 +36,14 @@
 #import "SFSDKAuthResponseCommand.h"
 #import "SFSDKAuthErrorCommand.h"
 #import "SFSDKIDPInitCommand.h"
+#import "SFSDKAuthPreferences.h"
+#import "SFOAuthCredentials+Internal.h"
 
 @interface SFSDKIDPAuthClient()
 @property (nonatomic, strong) SFSDKOAuthClientContext *context;
 @end
+
+static NSString * const  kOAuthScopesKey = @"oauth_scopes";
 
 @implementation SFSDKIDPAuthClient
 
@@ -106,8 +110,15 @@
 }
 
 - (BOOL)initiateLocalLoginInSPApp {
-    self.config.hideSettingsIcon = NO;
+    
+    if (self.isAuthenticating){
+        self.isAuthenticating = NO;
+      
+       [self.coordinator stopAuthentication];
+    }
+    self.config.loginViewControllerConfig.showSettingsIcon = NO;
     return [super refreshCredentials];
+
 }
 
 - (void)initiateIDPFlowInSPApp {
@@ -125,14 +136,14 @@
 
 - (void)beginIDPFlow:(SFSDKAuthRequestCommand *)request {
     // Should begin IDP Flow in the IDP App?
-    self.config.hideSettingsIcon = YES;
+    self.config.loginViewControllerConfig.showSettingsIcon = NO;
     SFSDKMutableOAuthClientContext *context = [self.context mutableCopy];
     self.context = context;
     [super refreshCredentials];
 }
 
 - (void)beginIDPFlowForNewUser {
-    self.config.hideSettingsIcon = YES;
+    self.config.loginViewControllerConfig.showSettingsIcon = NO;
     [super refreshCredentials];
 }
 
@@ -141,8 +152,11 @@
     NSString *spAppUrlStr = self.context.callingAppOptions[kSFOAuthRedirectUrlParam];
     NSURL *spAppUrl = [NSURL URLWithString:spAppUrlStr];
     NSURL *url = [self appURLWithError:error reason:reason app:spAppUrl.scheme];
-    [self.authWindow disable];
-    [[SFSDKWindowManager sharedManager].mainWindow enable];
+    
+    [[self.authWindow.viewController presentedViewController] dismissViewControllerAnimated:YES  completion:^{
+        [self.authWindow dismissWindow];
+        [[SFSDKWindowManager sharedManager].mainWindow presentWindow];
+    }];
     
     BOOL launched  = [SFApplicationHelper openURL:url];
     
@@ -173,7 +187,7 @@
     NSString *codeChallengeString = [[[self.coordinator.codeVerifier dataUsingEncoding:NSUTF8StringEncoding] msdkSha256Data] msdkBase64UrlString];
     
     SFSDKAuthRequestCommand *command = [[SFSDKAuthRequestCommand alloc] init];
-    command.scheme = self.config.idpAppScheme;
+    command.scheme = self.config.idpAppURIScheme;
     command.spClientId = self.config.oauthClientId;
     command.spCodeChallenge = codeChallengeString;
     command.spUserHint = self.context.userHint;
@@ -187,10 +201,17 @@
     if ( [self.config.idpDelegate respondsToSelector:@selector(authClient:willSendRequestForIDPAuth:)]) {
         [self.config.idpDelegate authClient:self willSendRequestForIDPAuth:command.allParams];
     }
+    [SFSDKCoreLogger d:[self class] format:@"attempting to launch IDP app %@", url];
     BOOL launched  = [SFApplicationHelper openURL:url];
     if (launched) {
         if ( [self.config.idpDelegate respondsToSelector:@selector(authClient:didSendRequestForIDPAuth:)]) {
             [self.config.idpDelegate authClient:self willSendRequestForIDPAuth:command.allParams];
+        }
+    } else {
+        [SFSDKCoreLogger e:[self class] format:@"attempting to launch IDP app %@ failed", url];
+        if ( [self.config.idpDelegate  respondsToSelector:@selector(authClient:error:)]) {
+            NSError *error = [self errorWithType:@"IDPAppLaunchFailed" description:@"Could not launch the IDP app"];
+            [self.config.idpDelegate authClient:self error:error];
         }
     }
     
@@ -217,13 +238,22 @@
     if ( [self.config.idpDelegate respondsToSelector:@selector(authClient:willSendResponseForIDPAuth:)]) {
         [self.config.idpDelegate authClient:self willSendResponseForIDPAuth:responseCommand.allParams];
     }
+
+    [[self.authWindow.viewController presentedViewController] dismissViewControllerAnimated:YES  completion:^{
+        [self.authWindow dismissWindow];
+        [[SFSDKWindowManager sharedManager].mainWindow presentWindow];
+    }];
     
-    [self.authWindow disable];
-    [[SFSDKWindowManager sharedManager].mainWindow enable];
     BOOL launched  = [SFApplicationHelper openURL:url];
     if (launched) {
         if ( [self.config.idpDelegate respondsToSelector:@selector(authClient:didSendRequestForIDPAuth:)]) {
             [self.config.idpDelegate authClient:self didSendRequestForIDPAuth:responseCommand.allParams];
+        }
+    } else {
+        [SFSDKCoreLogger e:[self class] format:@"attempting to launch SP app %@ failed", url];
+        if ( [self.config.idpDelegate respondsToSelector:@selector(authClient:error:)]) {
+            NSError *error = [self errorWithType:@"SPAppLaunchFailed" description:@"Could not launch the SP app"];
+            [self.config.idpDelegate authClient:self error:error];
         }
     }
     
@@ -285,6 +315,7 @@
     
     SFSDKMutableOAuthClientContext *mutableContext = [self.context mutableCopy];
     mutableContext.credentials = userCredentials;
+    self.config.loginViewControllerConfig.showSettingsIcon = NO;
     self.context = mutableContext;
     self.coordinator.credentials = userCredentials;
     SFOAuthCredentials *spAppCredentials = [self spAppCredentials];
@@ -346,9 +377,11 @@
 }
 
 - (BOOL)handleURLAuthenticationResponse:(NSURL *)appUrlResponse {
-    
-    [SFSDKCoreLogger i:[self class] format:@"handleAdvancedAuthenticationResponse"];
+    [SFSDKCoreLogger d:[self class] format:@"handleURLAuthenticationResponse called"];
     self.coordinator.credentials = self.context.credentials;
+    if(self.config.loginHost) {
+        self.coordinator.credentials.domain = self.config.loginHost;
+    }
     [self.coordinator handleIDPAuthenticationResponse:appUrlResponse];
     return YES;
 }

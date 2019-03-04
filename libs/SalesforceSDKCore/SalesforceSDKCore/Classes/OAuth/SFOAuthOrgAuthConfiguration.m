@@ -26,6 +26,10 @@
 
 static NSString * const kAuthConfigMobileSDKKey        = @"MobileSDK";
 static NSString * const kAuthConfigUseNativeBrowserKey = @"UseiOSNativeBrowserForAuthentication";
+static NSString * const kAuthConfigSamlProvidersKey    = @"SamlProviders";
+static NSString * const kAuthConfigSSOUrlKey           = @"SsoUrl";
+static NSString * const kAuthConfigLoginPageKey        = @"LoginPage";
+static NSString * const kAuthConfigLoginPageUrlKey     = @"LoginPageUrl";
 
 @interface SFOAuthOrgAuthConfiguration ()
 
@@ -49,7 +53,30 @@ static NSString * const kAuthConfigUseNativeBrowserKey = @"UseiOSNativeBrowserFo
     return [self.authConfigDict[kAuthConfigMobileSDKKey][kAuthConfigUseNativeBrowserKey] boolValue];
 }
 
-- (NSString *) description {
+- (NSArray<NSString *> *)ssoUrls {
+    NSMutableArray<NSString *> *ssoUrls = [[NSMutableArray alloc] init];
+    NSArray *samlProviders = self.authConfigDict[kAuthConfigSamlProvidersKey];
+    if (samlProviders && samlProviders.count > 0) {
+        for (int i = 0; i < samlProviders.count; i++) {
+            NSDictionary *provider = samlProviders[i];
+            if (provider) {
+                ssoUrls[i] = provider[kAuthConfigSSOUrlKey];
+            }
+        }
+    }
+    return ssoUrls;
+}
+
+- (NSString *)loginPageUrl {
+    NSString *loginPageUrl = nil;
+    NSDictionary *loginPage = self.authConfigDict[kAuthConfigLoginPageKey];
+    if (loginPage) {
+        loginPageUrl = loginPage[kAuthConfigLoginPageUrlKey];
+    }
+    return loginPageUrl;
+}
+
+- (NSString *)description {
     return [NSString stringWithFormat:@"<%@:%p> authConfigDict: %@", NSStringFromClass([self class]), self, self.authConfigDict];
 }
 

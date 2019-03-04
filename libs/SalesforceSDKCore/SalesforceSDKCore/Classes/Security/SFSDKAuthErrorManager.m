@@ -38,6 +38,7 @@
 static NSString * const kSFInvalidCredentialsAuthErrorHandler = @"InvalidCredentialsErrorHandler";
 static NSString * const kSFConnectedAppVersionAuthErrorHandler = @"ConnectedAppVersionErrorHandler";
 static NSString * const kSFNetworkFailureAuthErrorHandler = @"NetworkFailureErrorHandler";
+static NSString * const kSFHostConnectionErrorHandler = @"HostConnectionErrorHandler";
 static NSString * const kSFGenericFailureAuthErrorHandler = @"GenericFailureErrorHandler";
 
 @interface SFSDKAuthErrorManager()
@@ -46,6 +47,7 @@ static NSString * const kSFGenericFailureAuthErrorHandler = @"GenericFailureErro
 @property (nonatomic, readwrite) SFAuthErrorHandler *genericAuthErrorHandler;
 @property (nonatomic, readwrite) SFAuthErrorHandler *networkFailureAuthErrorHandler;
 @property (nonatomic, readwrite) SFAuthErrorHandler *connectedAppVersionAuthErrorHandler;
+@property (nonatomic, readwrite) SFAuthErrorHandler *hostConnectionErrorHandler;
 @end
 
 @implementation SFSDKAuthErrorManager
@@ -97,25 +99,47 @@ static NSString * const kSFGenericFailureAuthErrorHandler = @"GenericFailureErro
     self.networkFailureAuthErrorHandler = [[SFAuthErrorHandler alloc]
                                            initWithName:kSFNetworkFailureAuthErrorHandler
                                            evalOptionsBlock:^BOOL(NSError *error, SFOAuthInfo *authInfo, NSDictionary *options) {
+                                               BOOL result = NO;
                                                if ([[weakSelf class] errorIsNetworkFailure:error]) {
-
-                                                   if (self.networkErrorHandlerBlock) {
-                                                       self.networkErrorHandlerBlock(error, authInfo, options);
-                                                       return YES;
+                                                   if (authInfo.authType != SFOAuthTypeRefresh) {
+                                                       [SFSDKCoreLogger e:[weakSelf class] format:@"Network failure for non-Refresh OAuth flow (%@) is a fatal error.", authInfo.authTypeDescription];
+                                                   } else if ([SFUserAccountManager sharedInstance].currentUser.credentials.accessToken == nil) {
+                                                       [SFSDKCoreLogger w:[weakSelf class] format:@"Network unreachable for access token refresh, and no access token is configured.  Cannot continue."];
+                                                   } else {
+                                                       [SFSDKCoreLogger i:[weakSelf class]  format:@"Network failure for OAuth Refresh flow (existing credentials)  Try to continue."];
+                                                        if (self.networkErrorHandlerBlock) {
+                                                            self.networkErrorHandlerBlock(error, authInfo, options);
+                                                            result = YES;
+                                                        }
                                                    }
                                                }
-                                               return NO;
+                                               return result;
                                            }];
     [authHandlerList addAuthErrorHandler:self.networkFailureAuthErrorHandler];
     
+    // Generic failure handler
+    self.hostConnectionErrorHandler = [[SFAuthErrorHandler alloc]
+                                    initWithName:kSFHostConnectionErrorHandler
+                                    evalOptionsBlock:^BOOL(NSError *error, SFOAuthInfo *authInfo, NSDictionary *options) {
+                                        if (error.userInfo[@"_kCFStreamErrorCodeKey"] && error.userInfo[@"_kCFStreamErrorDomainKey"] ) {
+                                            if (self.hostConnectionErrorHandlerBlock) {
+                                                self.hostConnectionErrorHandlerBlock(error, authInfo, options);
+                                                 return YES;
+                                            }
+                                        }
+                                        return NO;
+                                    }];
+    
+    [authHandlerList addAuthErrorHandler:self.hostConnectionErrorHandler];
     // Generic failure handler
     self.genericAuthErrorHandler = [[SFAuthErrorHandler alloc]
                                     initWithName:kSFGenericFailureAuthErrorHandler
                                     evalOptionsBlock:^BOOL(NSError *error, SFOAuthInfo *authInfo, NSDictionary *options) {
                                         if (self.genericErrorHandlerBlock) {
                                             self.genericErrorHandlerBlock(error, authInfo, options);
+                                            return YES;
                                         }
-                                        return YES;
+                                        return NO;
                                     }];
     [authHandlerList addAuthErrorHandler:self.genericAuthErrorHandler];
     return authHandlerList;

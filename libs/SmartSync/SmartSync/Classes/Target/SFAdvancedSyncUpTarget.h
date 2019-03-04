@@ -31,22 +31,29 @@ NS_ASSUME_NONNULL_BEGIN
  Protocol for advanced sync up target where records are not simply created/updated/deleted
  With advanced sync up target, sync manager simply calls the method: syncUpRecord
  */
+NS_SWIFT_NAME(AdvancedSyncUpTarget)
 @protocol SFAdvancedSyncUpTarget
 
+/**
+ max number of records that can be passed to syncUpRecord at once
+ */
+@property (nonatomic,readonly) NSUInteger maxBatchSize;
 
 /**
- Sync up locally created/updated or deleted record back to server
+ Sync up locally created/updated or deleted records back to server
  @param syncManager The sync manager doing the sync
- @param record The record being synced
+ @param records The records being synced
  @param fieldlist List of fields to send to server
  @param mergeMode Merge mode (overwrite or leave if changed)
+ @param syncSoupName The soup being synched
  @param completionBlock The block to execute after the server call completes.
  @param failBlock The block to execute if the server call fails.
  */
-- (void)syncUpRecord:(SFSmartSyncSyncManager *)syncManager
-              record:(NSMutableDictionary*)record
+- (void)syncUpRecords:(SFSmartSyncSyncManager *)syncManager
+              records:(NSArray<NSMutableDictionary*>*)records
             fieldlist:(NSArray*)fieldlist
-           mergeMode:(SFSyncStateMergeMode)mergeMode
+            mergeMode:(SFSyncStateMergeMode)mergeMode
+         syncSoupName:(NSString*)syncSoupName
       completionBlock:(SFSyncUpTargetCompleteBlock)completionBlock
             failBlock:(SFSyncUpTargetErrorBlock)failBlock;
 

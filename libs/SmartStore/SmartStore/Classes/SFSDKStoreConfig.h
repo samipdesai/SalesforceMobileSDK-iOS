@@ -46,6 +46,7 @@ NS_ASSUME_NONNULL_BEGIN
  *     ]
  * }
  */
+NS_SWIFT_NAME(StoreConfig)
 @interface SFSDKStoreConfig : NSObject
 
 /**
@@ -53,7 +54,7 @@ NS_ASSUME_NONNULL_BEGIN
  * @param path to the config file
  * @return instance of SFSDKStoreConfig
  */
-- (nullable id)initWithResourceAtPath:(NSString*)path;
+- (nullable instancetype)initWithResourceAtPath:(NSString*)path;
 
 /**
  * Register the soup from the config in the given store
@@ -62,6 +63,12 @@ NS_ASSUME_NONNULL_BEGIN
  * @param store to register soups in.
  */
 - (void) registerSoups:(SFSmartStore*) store;
+
+/**
+ * Check for soups in store
+ * @return YES if soups are defined in config
+ */
+- (BOOL)hasSoups;
 
 @end
 

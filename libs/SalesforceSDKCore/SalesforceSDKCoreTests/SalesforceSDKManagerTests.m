@@ -25,11 +25,12 @@
 #import <XCTest/XCTest.h>
 #import "SFTestSDKManagerFlow.h"
 #import "SalesforceSDKManager+Internal.h"
-#import "SFAuthenticationManager+Internal.h"
 #import "SFOAuthCoordinator+Internal.h"
 #import "SFUserAccountManager+Internal.h"
 #import "SFSDKSalesforceAnalyticsManager.h"
 #import "SFSDKAppConfig.h"
+#import "SFUserAccount+Internal.h"
+#import "SFOAuthCredentials+Internal.h"
 
 static NSTimeInterval const kTimeDelaySecsBetweenLaunchSteps = 0.5;
 static NSString* const kTestAppName = @"OverridenAppName";
@@ -233,6 +234,36 @@ static NSString* const kTestAppName = @"OverridenAppName";
     XCTAssertTrue(authBypassed, @"Launch should have generated an auth-bypassed status.");
 }
 
+- (void)testUserSwitching
+{
+    [SalesforceSDKManager sharedManager].appConfig.shouldAuthenticate = NO;
+    [self createStandardPostLaunchBlock];
+    [self createTestAppIdentity];
+    XCTAssertNil([SFUserAccountManager sharedInstance].currentUser, @"Current user should be nil.");
+    [SFUserAccountManager sharedInstance].currentUser = [self createUserAccount];
+    XCTAssertNotNil([SFUserAccountManager sharedInstance].currentUser, @"Current user should not be nil.");
+    SFUserAccount *userTo = [self createUserAccount];
+    SFUserAccount *userFrom = [SFUserAccountManager sharedInstance].currentUser;
+    XCTestExpectation *willSwitchExpectation = [self expectationWithDescription:@"willSwitch"];
+    XCTestExpectation *didSwitchExpectation = [self expectationWithDescription:@"didSwitch"];
+    __weak typeof (self) weakSelf = self;
+    [_currentSdkManagerFlow setUpUserSwitchState:[SFUserAccountManager sharedInstance].currentUser toUser:userTo completion:^(SFUserAccount *fromUser, SFUserAccount *toUser,BOOL before) {
+        __strong typeof (weakSelf) self = weakSelf;
+        NSString *beforeAfterString = before?@" in willSwitchuser " :@" in didSwitchuser ";
+        XCTAssertTrue([fromUser isEqual:userFrom],@"Switch from user is different than expected  %@",beforeAfterString);
+        XCTAssertTrue([toUser isEqual:userTo],@"Switch to user is different than expected  %@",beforeAfterString);
+        if( before ) {
+            [willSwitchExpectation fulfill];
+        }else {
+            XCTAssertTrue([toUser isEqual:[SFUserAccountManager sharedInstance].currentUser],@"Switch to user  should change current user");
+            [didSwitchExpectation fulfill];
+        }
+    }];
+    [[SFUserAccountManager sharedInstance] switchToUser:userTo];
+    [self waitForExpectations:@[willSwitchExpectation, didSwitchExpectation] timeout:20];
+    [_currentSdkManagerFlow clearUserSwitchState];
+}
+
 #pragma mark - Snapshot Tests
 
 - (void)testUsesSnapshot
@@ -402,29 +433,26 @@ static NSString* const kTestAppName = @"OverridenAppName";
     [SalesforceSDKManager sharedManager].brandLoginPath = brandPath;
     XCTAssertTrue([brandPath isEqualToString:[SFUserAccountManager  sharedInstance].brandLoginPath]);
 }
-SFSDK_USE_DEPRECATED_BEGIN
+
 - (void)testBrandedLoginPathInAuthManagerAndAuthorizeEndpoint
 {
     NSString *brandPath = @"/BRAND/SUB-BRAND/";
-    [SalesforceSDKManager sharedManager].brandLoginPath = brandPath;
-    
     [self createTestAppIdentity];
+    SFOAuthCredentials *credentials = [[SFOAuthCredentials alloc] initWithIdentifier:@"TESTBRAND" clientId:@"TESTBRAND" encrypted:NO];
+    credentials.domain = @"TESTBRAND";
+    credentials.redirectUri = @"TESTBRAND_URI";
     
-    SFOAuthCredentials *credentials = [[SFAuthenticationManager sharedManager] createOAuthCredentials];
-    [[SFAuthenticationManager sharedManager] setupWithCredentials:credentials];
-    
-    NSString *brandedURL = [[SFAuthenticationManager sharedManager].coordinator generateApprovalUrlString];
+    SFOAuthCoordinator *coordinator = [[SFOAuthCoordinator alloc] initWithCredentials:credentials];
+    coordinator.brandLoginPath = brandPath;
+    NSString *brandedURL = [coordinator generateApprovalUrlString];
     
     XCTAssertNotNil(brandedURL);
-    
-    XCTAssertTrue([brandPath isEqualToString:[SFAuthenticationManager sharedManager].brandLoginPath]);
-    
     //Should not have a trailing slash
     XCTAssertFalse([brandedURL containsString:[brandPath substringToIndex:brandPath.length]]);
     //should have brand
     XCTAssertTrue([brandedURL containsString:[brandPath substringToIndex:brandPath.length-1]]);
 }
-SFSDK_USE_DEPRECATED_END
+
 #pragma mark - Private helpers
 
 - (void)createStandardPostLaunchBlock
@@ -483,6 +511,7 @@ SFSDK_USE_DEPRECATED_END
     NSString *userId = [NSString stringWithFormat:@"user_%u", userIdentifier];
     NSString *orgId = [NSString stringWithFormat:@"org_%u", userIdentifier];
     user.credentials.identityUrl = [NSURL URLWithString:[NSString stringWithFormat:@"https://login.salesforce.com/id/%@/%@", orgId, userId]];
+    [user transitionToLoginState:SFUserAccountLoginStateLoggedIn];
     NSError *error = nil;
     [[SFUserAccountManager sharedInstance] saveAccountForUser:user error:&error];
     XCTAssertNil(error, @"Should be able to create user account");
@@ -503,7 +532,8 @@ SFSDK_USE_DEPRECATED_END
     _origPostLogoutAction = [SalesforceSDKManager sharedManager].postLogoutAction; [SalesforceSDKManager sharedManager].postLogoutAction = NULL;
     _origSwitchUserAction = [SalesforceSDKManager sharedManager].switchUserAction; [SalesforceSDKManager sharedManager].switchUserAction = NULL;
     _origPostAppForegroundAction = [SalesforceSDKManager sharedManager].postAppForegroundAction; [SalesforceSDKManager sharedManager].postAppForegroundAction = NULL;
-    _origCurrentUser = [SFUserAccountManager sharedInstance].currentUser; [SFUserAccountManager sharedInstance].currentUser = nil;
+    _origCurrentUser = [SFUserAccountManager sharedInstance].currentUser;
+    [SFUserAccountManager sharedInstance].currentUser = nil;
     _postLaunchBlockCalled = NO;
     _postLaunchActions = SFSDKLaunchActionNone;
     _launchErrorBlockCalled = NO;

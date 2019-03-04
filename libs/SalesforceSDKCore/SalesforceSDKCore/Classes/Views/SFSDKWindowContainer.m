@@ -27,7 +27,8 @@
  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #import "SFSDKWindowContainer.h"
-
+#import "SFSDKWindowManager.h"
+#import "SFSDKRootController.h"
 @interface SFSDKWindowContainer()
 
 @end
@@ -35,12 +36,18 @@
 @implementation SFSDKWindowContainer
 @synthesize window = _window;
 
+- (instancetype)initWithName:(NSString *)windowName {
+    self = [super init];
+    if (self) {
+        _windowName = windowName;
+    }
+    return self;
+}
+
 - (instancetype)initWithWindow:(UIWindow *)window name:(NSString *) windowName {
-    
     self = [super init];
     if (self) {
         _window = window;
-        _window.hidden = NO;
         _windowName = windowName;
         _viewController = window.rootViewController;
     }
@@ -49,9 +56,13 @@
 
 - (UIWindow *)window {
     if (_window == nil) {
-        _window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-         _window.hidden = NO;
-        _window.rootViewController = _viewController;
+        _window = [[SFSDKUIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds  andName:_windowName];
+        _window.windowLevel = self.windowLevel;
+        UIViewController *controller = _viewController;
+        if (!controller) {
+            controller = [[SFSDKRootController alloc] init];
+        }
+        self.viewController = controller;
     }
     return _window;
 }
@@ -59,31 +70,34 @@
 - (void)setViewController:(UIViewController *) viewController {
     if (_viewController != viewController) {
         _viewController = viewController;
-        self.window.rootViewController = viewController;
+        if (_window) {
+            _window.rootViewController = viewController;
+        }
     }
 }
 
-- (void)enable {
-    [self enable:NO withCompletion:nil];
+- (void)presentWindow {
+    [self presentWindowAnimated:NO withCompletion:nil];
 }
 
 - (BOOL)isEnabled {
-    return self.window.alpha == 1.0;
+    return _window && _window.isKeyWindow;
 }
-- (void)enable:(BOOL)animated withCompletion:(void (^)(void))completion {
-    if ( [self.windowDelegate respondsToSelector:@selector(windowEnable:animated:withCompletion:)]) {
-        [self.windowDelegate windowEnable:self animated:animated withCompletion:completion];
+
+- (void)presentWindowAnimated:(BOOL)animated withCompletion:(void (^ _Nullable)(void))completion {
+    if ([self.windowDelegate respondsToSelector:@selector(presentWindow:animated:withCompletion:)]) {
+        [self.windowDelegate presentWindow:self animated:animated withCompletion:completion];
     }
 }
 
-- (void)disable {
-    [self disable:NO withCompletion:nil];
+- (void)dismissWindow {
+    [self dismissWindowAnimated:NO withCompletion:nil];
 }
 
-- (void)disable:(BOOL)animated withCompletion:(void (^)(void))completion {
+- (void)dismissWindowAnimated:(BOOL)animated withCompletion:(void (^ _Nullable)(void))completion {
     if ([self isEnabled]) {
-        if ( [self.windowDelegate respondsToSelector:@selector(windowDisable:animated:withCompletion:)]) {
-            [self.windowDelegate windowDisable:self animated:animated withCompletion:completion];
+        if ([self.windowDelegate respondsToSelector:@selector(dismissWindow:animated:withCompletion:)]) {
+            [self.windowDelegate dismissWindow:self animated:animated withCompletion:completion];
         }
     }
 }
@@ -103,6 +117,36 @@
 
 - (BOOL)isPasscodeWindow {
     return _windowType == SFSDKWindowTypePasscode;
+}
+
+- (UIViewController*)topViewController {
+    return [SFSDKWindowContainer topViewControllerWithRootViewController:_window.rootViewController];
+}
+
++ (UIViewController*)topViewControllerWithRootViewController:(UIViewController*)viewController {
+    if ([viewController isKindOfClass:[UITabBarController class]]) {
+        UITabBarController* tabBarController = (UITabBarController*)viewController;
+        return [self topViewControllerWithRootViewController:tabBarController.selectedViewController];
+    } else if ([viewController isKindOfClass:[UINavigationController class]]) {
+        UINavigationController* navContObj = (UINavigationController*)viewController;
+        return [self topViewControllerWithRootViewController:navContObj.visibleViewController];
+    } else if (viewController.presentedViewController && !viewController.presentedViewController.isBeingDismissed) {
+        UIViewController* presentedViewController = viewController.presentedViewController;
+        return [self topViewControllerWithRootViewController:presentedViewController];
+    }
+    else {
+        for (UIView *view in [viewController.view subviews])
+        {
+            id subViewController = [view nextResponder];
+            if ( subViewController && [subViewController isKindOfClass:[UIViewController class]])
+            {
+                if ([(UIViewController *)subViewController presentedViewController]  && ![subViewController presentedViewController].isBeingDismissed) {
+                    return [self topViewControllerWithRootViewController:[(UIViewController *)subViewController presentedViewController]];
+                }
+            }
+        }
+        return viewController;
+    }
 }
 
 @end

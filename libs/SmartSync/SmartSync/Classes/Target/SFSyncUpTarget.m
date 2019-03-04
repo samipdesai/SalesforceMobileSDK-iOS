@@ -22,19 +22,23 @@
  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "SFSyncUpTarget.h"
+#import "SFSyncUpTarget+Internal.h"
+#import "SFBatchingSyncUpTarget.h"
 #import "SFSmartSyncConstants.h"
 #import "SFSmartSyncNetworkUtils.h"
 #import "SFSmartSyncSyncManager.h"
 #import "SFSmartSyncObjectUtils.h"
-#import <SalesforceSDKCore/SFJsonUtils.h>
+#import "SFSyncTarget+Internal.h"
+#import <SalesforceSDKCommon/SFJsonUtils.h>
 #import <SmartStore/SFSmartStore.h>
+
+//
+NSString * const kSFSyncUpTargetCreateFieldlist = @"createFieldlist";
+NSString * const kSFSyncUpTargetUpdateFieldlist = @"updateFieldlist";
 
 // target types
 static NSString *const kSFSyncUpTargetTypeRestStandard = @"rest";
 static NSString *const kSFSyncUpTargetTypeCustom = @"custom";
-static NSString *const kSFSyncUpTargetCreateFieldlist = @"createFieldlist";
-static NSString *const kSFSyncUpTargetUpdateFieldlist = @"updateFieldlist";
 
 @implementation SFRecordModDate
 - (instancetype)initWithTimestamp:(NSString*)timestamp isDeleted:(BOOL)isDeleted {
@@ -51,8 +55,7 @@ static NSString *const kSFSyncUpTargetUpdateFieldlist = @"updateFieldlist";
 typedef void (^SFSyncUpRecordModDateBlock)(SFRecordModDate *remoteModDate);
 
 @interface  SFSyncUpTarget ()
-@property (nonatomic, strong) NSArray*  createFieldlist;
-@property (nonatomic, strong) NSArray*  updateFieldlist;
+@property (nonatomic, strong) NSString* lastError;
 @end
 
 @implementation SFSyncUpTarget
@@ -67,8 +70,8 @@ typedef void (^SFSyncUpRecordModDateBlock)(SFRecordModDate *remoteModDate);
     return [self initWithCreateFieldlist:nil updateFieldlist:nil];
 }
 
-- (instancetype)initWithCreateFieldlist:(NSArray *)createFieldlist
-                        updateFieldlist:(NSArray *)updateFieldlist {
+- (instancetype)initWithCreateFieldlist:(NSArray<NSString*> *)createFieldlist
+                        updateFieldlist:(NSArray<NSString*> *)updateFieldlist {
     self = [super init];
     if (self) {
         self.targetType = SFSyncUpTargetTypeRestStandard;
@@ -81,8 +84,8 @@ typedef void (^SFSyncUpRecordModDateBlock)(SFRecordModDate *remoteModDate);
 
 + (instancetype)newFromDict:(NSDictionary*)dict {
     // We should have an implementation class or a target type
-    NSString* implClassName = dict[kSFSyncTargetiOSImplKey];
-    if (implClassName.length > 0) {
+    if (dict != nil && [dict[kSFSyncTargetiOSImplKey] length] > 0) {
+        NSString* implClassName = dict[kSFSyncTargetiOSImplKey];
         Class customSyncUpClass = NSClassFromString(implClassName);
         if (![customSyncUpClass isSubclassOfClass:[SFSyncUpTarget class]]) {
             [SFSDKSmartSyncLogger e:[self class] format:@"%@ Class '%@' is not a subclass of %@.", NSStringFromSelector(_cmd), implClassName, NSStringFromClass([SFSyncUpTarget class])];
@@ -94,10 +97,11 @@ typedef void (^SFSyncUpRecordModDateBlock)(SFRecordModDate *remoteModDate);
     // No implementation class - using target type
     else {
         // No target type - assume kSFSyncUpTargetTypeRestStandard (hybrid apps don't specify it a sync up target type by default)
-        NSString *targetTypeString = (dict[kSFSyncTargetTypeKey] == nil ? kSFSyncUpTargetTypeRestStandard : dict[kSFSyncTargetTypeKey]);
+        NSString *targetTypeString = (dict == nil || dict[kSFSyncTargetTypeKey] == nil ? kSFSyncUpTargetTypeRestStandard : dict[kSFSyncTargetTypeKey]);
         switch ([self targetTypeFromString:targetTypeString]) {
             case SFSyncUpTargetTypeRestStandard:
-                return [[SFSyncUpTarget alloc] initWithDict:dict];
+                // Default sync up target (it's SFBatchingSyncUpTarget starting in Mobile SDK 7.1)
+                return [[SFBatchingSyncUpTarget alloc] initWithDict:dict];
             case SFSyncUpTargetTypeCustom:
                 [SFSDKSmartSyncLogger e:[self class] format:@"%@ Custom class name not specified.", NSStringFromSelector(_cmd)];
                 return nil;
@@ -224,6 +228,7 @@ typedef void (^SFSyncUpRecordModDateBlock)(SFRecordModDate *remoteModDate);
 {
     SFRestRequest* request = [[SFRestAPI sharedInstance] requestForCreateWithObjectType:objectType fields:fields];
     [SFSmartSyncNetworkUtils sendRequestWithSmartSyncUserAgent:request failBlock:^(NSError *e, NSURLResponse *rawResponse) {
+        self.lastError = e.description;
         failBlock(e);
     } completeBlock:^(NSDictionary* d, NSURLResponse *rawResponse) {
         completionBlock(d);
@@ -238,6 +243,7 @@ typedef void (^SFSyncUpRecordModDateBlock)(SFRecordModDate *remoteModDate);
 {
     SFRestRequest* request = [[SFRestAPI sharedInstance] requestForUpdateWithObjectType:objectType objectId:objectId fields:fields];
     [SFSmartSyncNetworkUtils sendRequestWithSmartSyncUserAgent:request failBlock:^(NSError *e, NSURLResponse *rawResponse) {
+        self.lastError = e.description;
         failBlock(e);
     } completeBlock:^(NSDictionary* d, NSURLResponse *rawResponse) {
         completionBlock(d);
@@ -251,6 +257,7 @@ typedef void (^SFSyncUpRecordModDateBlock)(SFRecordModDate *remoteModDate);
 {
     SFRestRequest* request = [[SFRestAPI sharedInstance] requestForDeleteWithObjectType:objectType objectId:objectId];
     [SFSmartSyncNetworkUtils sendRequestWithSmartSyncUserAgent:request failBlock:^(NSError *e, NSURLResponse *rawResponse) {
+        self.lastError = e.description;
         failBlock(e);
     } completeBlock:^(NSDictionary* d, NSURLResponse *rawResponse) {
         completionBlock(d);
@@ -292,6 +299,31 @@ if ((localModDate.timestamp != nil && remoteModDate.timestamp != nil
         return true;
     }
     return false;
+}
+
+- (void) saveRecordToLocalStoreWithLastError:(SFSmartSyncSyncManager*)syncManager
+                                    soupName:(NSString*) soupName
+                                      record:(NSDictionary*) record {
+    [self saveRecordToLocalStoreWithLastError:syncManager
+                                     soupName:soupName
+                                       record:record
+                                    lastError:self.lastError];
+    self.lastError = nil;
+}
+
+- (void) saveRecordToLocalStoreWithLastError:(SFSmartSyncSyncManager*)syncManager
+                                    soupName:(NSString*) soupName
+                                      record:(NSDictionary*) record
+                                   lastError:(NSString*) lastError {
+    if (lastError) {
+        [self saveInLocalStore:syncManager
+                      soupName:soupName
+                       records:@[record]
+                   idFieldName:self.idFieldName
+                        syncId:nil
+                     lastError:lastError
+                    cleanFirst:NO];
+    }
 }
 
 @end

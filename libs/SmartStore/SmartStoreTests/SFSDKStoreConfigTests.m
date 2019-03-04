@@ -30,7 +30,7 @@
 @property (nonatomic, strong) SFUserAccount *smartStoreUser;
 @property (nonatomic, strong) SFSmartStore *store;
 @property (nonatomic, strong) SFSmartStore *globalStore;
-@property (nonatomic, strong) SalesforceSDKManagerWithSmartStore* sdkManager;
+@property (nonatomic, strong) SmartStoreSDKManager* sdkManager;
 
 @end
 
@@ -41,8 +41,8 @@
 - (void) setUp
 {
     [super setUp];
-    [SFSDKSmartStoreLogger setLogLevel:DDLogLevelDebug];
-    self.sdkManager = [[SalesforceSDKManagerWithSmartStore alloc] init];
+    [SFSDKSmartStoreLogger setLogLevel:SFLogLevelDebug];
+    self.sdkManager = [[SmartStoreSDKManager alloc] init];
     self.smartStoreUser = [self setUpSmartStoreUser];
     self.store = [SFSmartStore sharedStoreWithName:kDefaultSmartStoreName];
     self.globalStore = [SFSmartStore sharedGlobalStoreWithName:kDefaultSmartStoreName];
@@ -63,7 +63,7 @@
 
 #pragma mark - tests
 
-- (void) testSetupGlobalStoreFromDefaulltConfig  {
+- (void) testSetupGlobalStoreFromDefaultConfig  {
 
     XCTAssertFalse([self.globalStore soupExists:@"globalSoup1"]);
     XCTAssertFalse([self.globalStore soupExists:@"globalSoup2"]);
@@ -99,7 +99,7 @@
     [self checkSoupIndex:(SFSoupIndex*)indexSpecs[4] expectedPath:@"ftsField2" expectedType:kSoupIndexTypeFullText expectedColumnName:@"TABLE_2_4"];
 }
 
-- (void) testSetupUserStoreFromDefaulltConfig {
+- (void) testSetupUserStoreFromDefaultConfig {
     XCTAssertFalse([self.store soupExists:@"userSoup1"]);
     XCTAssertFalse([self.store soupExists:@"userSoup2"]);
     

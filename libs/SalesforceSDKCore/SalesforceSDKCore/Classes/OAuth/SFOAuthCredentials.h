@@ -38,7 +38,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
      OAuth credentials will be stored securely within the keychain.
      */
     SFOAuthCredentialsStorageTypeKeychain,
-};
+} NS_SWIFT_NAME(OAuthCredentials.StorageType);
 
 /** Object representing an individual user account's logon credentials.
  
@@ -63,6 +63,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
 
  @see SFOAuthCoordinator
  */
+NS_SWIFT_NAME(OAuthCredentials)
 @interface SFOAuthCredentials : NSObject <NSSecureCoding, NSCopying>
 
 /** Protocol scheme for authenticating this account.
@@ -74,7 +75,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  The domain used to initiate a user login, for example _login.salesforce.com_
  or _test.salesforce.com_. The default is _login.salesforce.com_.
  */
-@property (nonatomic, copy, nullable) NSString *domain;
+@property (nonatomic, readonly, nullable) NSString *domain;
 
 /** Credential identifier used to uniquely identify this credential in the keychain. 
  
@@ -82,7 +83,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  `nil` or empty value prior to accessing properties or methods identified in the documentation regarding this prohibition.
  @warning This property must not be modified while authenticating.
  */
-@property (copy, nonnull) NSString *identifier;
+@property (nonatomic, readonly, nonnull) NSString *identifier;
 
 /** Client consumer key.
  
@@ -91,13 +92,13 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  @warning This property must not be `nil` or empty when authentication is initiated or an exception will be raised.
  @warning This property must not be modified while authenticating.
  */
-@property (copy, nullable) NSString *clientId;
+@property (nonatomic, readonly, nullable) NSString *clientId;
 
 /** Callback URL to load at the end of the authentication process.
  
  This must match the callback URL in the Remote Access object exactly, or authentication will fail.
  */
-@property (nonatomic, copy, nullable) NSString *redirectUri;
+@property (nonatomic, readonly, nullable) NSString *redirectUri;
 
 /** JWT.
  
@@ -105,7 +106,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  @warning This property must not be modified while authenticating.
  @warning This property should be set to nil after authentication.
  */
-@property (nonatomic, copy, nullable) NSString *jwt;
+@property (nonatomic, readonly, nullable) NSString *jwt;
 
 /** Token used to refresh the user's session.
  
@@ -114,7 +115,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  @warning The setter for this property is exposed publicly only for unit tests. Client code should use the revoke methods instead.
  @exception NSInternalInconsistencyException If this property is accessed when the identifier property is `nil`.
  */
-@property (nonatomic, copy, nullable) NSString *refreshToken;
+@property (nonatomic, readonly, nullable) NSString *refreshToken;
 
 /** The access token for the user's session.
  
@@ -123,7 +124,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  @warning The setter for this property is exposed publicly only for unit tests. Client code should use the revoke methods instead.
  @exception NSInternalInconsistencyException If accessed while the identifier property is `nil`.
  */
-@property (nonatomic, copy, nullable) NSString *accessToken;
+@property (nonatomic, readonly, nullable) NSString *accessToken;
 
 /** A readonly convenience property returning the Salesforce Organization ID provided in the path component of the identityUrl.
  
@@ -132,7 +133,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  @warning The setter for this property is exposed publicly only for unit tests. Client code should not set this property.
  @exception NSInternalInconsistencyException If accessed while the identifier property is `nil`.
  */
-@property (nonatomic, copy, nullable) NSString *organizationId;
+@property (nonatomic, readonly, nullable) NSString *organizationId;
 
 /** The URL of the server instance for this session. This URL always refers to the base organization
  instance, even if the user has logged through a community-based login flow.
@@ -143,21 +144,21 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  
  @warning The setter for this property is exposed publicly only for unit tests. Client code should not set this property.
  */
-@property (nonatomic, copy, nullable) NSURL *instanceUrl;
+@property (nonatomic, readonly, nullable) NSURL *instanceUrl;
 
 /** The community ID the user choose to log into. This usually happens when the user
  logs into the app using a community-based login page
  
  Note: this property is nil of the user logs into the internal community or into an org that doesn't have communities.
  */
-@property (nonatomic, copy, nullable) NSString *communityId;
+@property (nonatomic, readonly, nullable) NSString *communityId;
 
 /** The community-base URL the user choose to log into. This usually happens when the user
  logs into the app using a community-based login page
  
  Note: this property is nil if the user logs into the internal community or into an org that doesn't have communities.
  */
-@property (nonatomic, copy, nullable) NSURL *communityUrl;
+@property (nonatomic, readonly, nullable) NSURL *communityUrl;
 
 /** The timestamp when the session access token was issued.
  
@@ -165,7 +166,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  
  @warning The setter for this property is exposed publicly only for unit tests. Client code should not set this property.
  */
-@property (nonatomic, copy, nullable) NSDate *issuedAt;
+@property (nonatomic, readonly, nullable) NSDate *issuedAt;
 
 /** The identity URL for the user returned as part of a successful authentication response.
  The format of the URL is: _https://login.salesforce.com/ID/orgID/userID_ where orgId is the ID of the Salesforce organization 
@@ -175,17 +176,11 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  
  @warning The setter for this property is exposed publicly only for unit tests. Client code should not set this property.
  */
-@property (nonatomic, copy, nullable) NSURL *identityUrl;
-
-/**
- Contains legacy identity service information from some previous app versions. Not
- applicable to most applications.  See SFIdentityData for current identity management.
- */
-@property (nonatomic, readonly, nullable) NSDictionary *legacyIdentityInformation;
+@property (nonatomic, readonly, nullable) NSURL *identityUrl;
 
 /** The community URL, if present. The instance URL, otherwise.
  */
-@property (readonly, nullable) NSURL *apiUrl;
+@property (nonatomic, readonly, nullable) NSURL *apiUrl;
 
 /** A readonly convenience property returning the first 15 characters of the Salesforce User ID provided in the final path 
  component of the identityUrl.
@@ -194,7 +189,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  
  @warning The setter for this property is exposed publicly only for unit tests. Client code should not set this property.
  */
-@property (nonatomic, copy, nullable) NSString *userId;
+@property (nonatomic, readonly, nullable) NSString *userId;
 
 /**
  Determines if sensitive data such as the `refreshToken` and `accessToken` are encrypted
@@ -202,14 +197,14 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
 @property (nonatomic, readonly, getter = isEncrypted) BOOL encrypted;
 
 /**
- A dictionary containing key-value pairs for any of the keys provided via the additionalOAuthParameterKeys property of SFAuthenticationManager.
+ A dictionary containing key-value pairs for any of the keys provided via the additionalOAuthParameterKeys property of SFUserAccountManager.
  If a key does not match a value in the parsed response, then it will not exist in the dictionary.
  */
 @property (nonatomic, readonly, nullable) NSDictionary * additionalOAuthFields;
 
-@property (nonatomic, copy, nullable) NSString *challengeString;
+@property (nonatomic, readonly, nullable) NSString *challengeString;
 
-@property (nonatomic, copy, nullable) NSString *authCode;
+@property (nonatomic, readonly, nullable) NSString *authCode;
 
 ///---------------------------------------------------------------------------------------
 /// @name Initialization
@@ -225,7 +220,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  @param encrypted Determines if the sensitive data like refreshToken and accessToken should be encrypted
  @return An initialized authentication credential object.
  */
-- (_Nullable instancetype)initWithIdentifier:( NSString * _Nonnull)theIdentifier clientId:( NSString * _Nullable )theClientId encrypted:(BOOL)encrypted;
+- (_Nullable instancetype)initWithIdentifier:(NSString * _Nonnull)theIdentifier clientId:(NSString * _Nullable )theClientId encrypted:(BOOL)encrypted;
 
 /** Initializes an authentication credential object with the given identifier and client ID. This is the designated initializer.
  
@@ -240,6 +235,7 @@ typedef NS_ENUM(NSInteger, SFOAuthCredentialsStorageType){
  */
 - (_Nullable instancetype)initWithIdentifier:(NSString * _Nonnull )theIdentifier clientId:(NSString * _Nullable)theClientId encrypted:(BOOL)encrypted storageType:(SFOAuthCredentialsStorageType)type;
 
+- (id)initWithCoder:(NSCoder *)coder;
 /** Revoke the OAuth access and refresh tokens.
  
  @warning Calling this method when the identifier property is `nil` will raise an NSInternalInconsistencyException.

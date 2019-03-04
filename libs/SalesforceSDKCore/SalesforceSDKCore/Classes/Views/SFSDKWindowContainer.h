@@ -29,6 +29,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 typedef NS_ENUM(NSInteger, SFSDKWindowType) {
     SFSDKWindowTypeMain,
     SFSDKWindowTypeAuth,
@@ -45,13 +47,13 @@ typedef NS_ENUM(NSInteger, SFSDKWindowType) {
  Called when the window has to be enabled
  @param window The window
  */
-- (void)windowEnable:(SFSDKWindowContainer *_Nonnull)window animated:(BOOL)animated withCompletion:(void (^_Nullable)(void))completion;
+- (void)presentWindow:(SFSDKWindowContainer *)window animated:(BOOL)animated withCompletion:(void (^_Nullable)(void))completion;
 
 /**
  Called when the window has to be disabled
  @param window The window
  */
-- (void)windowDisable:(SFSDKWindowContainer *_Nonnull)window animated:(BOOL)animated withCompletion:(void (^_Nullable)(void))completion;
+- (void)dismissWindow:(SFSDKWindowContainer *)window animated:(BOOL)animated withCompletion:(void (^_Nullable)(void))completion;
 @end
 
 @interface SFSDKWindowContainer : NSObject
@@ -65,7 +67,9 @@ typedef NS_ENUM(NSInteger, SFSDKWindowType) {
 
 /** SFSDKWindowType windowName
  */
-@property (nonatomic, copy, readonly) NSString * _Nonnull windowName;
+@property (nonatomic, copy, readonly) NSString * windowName;
+
+@property(nonatomic) UIWindowLevel windowLevel; 
 
 /** UIViewController viewController
  */
@@ -80,7 +84,14 @@ typedef NS_ENUM(NSInteger, SFSDKWindowType) {
  @param windowName key for the UIWindow
  @return SFSDKWindowComtainer
  */
-- (instancetype _Nonnull )initWithWindow:(UIWindow *_Nonnull)window name:(NSString *_Nonnull) windowName;
+- (instancetype)initWithWindow:(UIWindow *)window name:(NSString *) windowName;
+
+/**
+ Create an instance of a Window
+ @param windowName key for the UIWindow
+ @return SFSDKWindowComtainer
+ */
+- (instancetype)initWithName:(NSString *) windowName;
 
 /**
  * Returns true if window alpha is set to 1.0
@@ -90,21 +101,22 @@ typedef NS_ENUM(NSInteger, SFSDKWindowType) {
 /**
  * Make window visible, set alpha to 1.0
  */
-- (void)enable;
+- (void)presentWindow;
+
 /**
  * Make window visible, set alpha to 1.0 invoke completion block
  */
-- (void)enable:(BOOL)animated withCompletion:(void (^_Nullable)(void))completion;
+- (void)presentWindowAnimated:(BOOL)animated withCompletion:(void (^_Nullable)(void))completion;
 
 /**
  * Make window visible
  */
-- (void)disable:(BOOL)animated withCompletion:(void (^_Nullable)(void))completion;
+- (void)dismissWindowAnimated:(BOOL)animated withCompletion:(void (^_Nullable)(void))completion;
 
 /**
  * Make window invisible
  */
-- (void)disable;
+- (void)dismissWindow;
 
 /** Convenience API returns true if the SFSDKWindowType is main
  * @return YES if this is the main Window
@@ -126,5 +138,15 @@ typedef NS_ENUM(NSInteger, SFSDKWindowType) {
  */
 - (BOOL)isPasscodeWindow;
 
+/**
+ * Tries to return top view controller of this window
+ */
+- (UIViewController*) topViewController;
 
+/**
+ * Tries to return top view controller given a rootViewcontroller
+ */
++ (UIViewController*)topViewControllerWithRootViewController:(UIViewController*)viewController;
 @end
+
+NS_ASSUME_NONNULL_END

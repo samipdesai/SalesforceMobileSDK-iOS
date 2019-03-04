@@ -24,11 +24,14 @@
 
 #import "SFSmartStoreTestCase.h"
 #import "SFSoupIndex.h"
-#import <SalesforceSDKCore/SFJsonUtils.h>
+#import <SalesforceSDKCommon/SFJsonUtils.h>
 #import "SFSmartStore+Internal.h"
 #import "FMDatabaseQueue.h"
 #import "FMDatabase.h"
+@interface SFOAuthCredentials ()
+@property (nonatomic, readwrite, nullable) NSURL *identityUrl;
 
+@end
 @implementation SFSmartStoreTestCase
 
 #pragma mark - helper methods for comparing json
@@ -344,7 +347,7 @@
     NSString *userId = [NSString stringWithFormat:@"user_%u", userIdentifier];
     NSString *orgId = [NSString stringWithFormat:@"org_%u", userIdentifier];
     user.credentials.identityUrl = [NSURL URLWithString:[NSString stringWithFormat:@"https://login.salesforce.com/id/%@/%@", orgId, userId]];
-
+    [user transitionToLoginState:SFUserAccountLoginStateLoggedIn];
     NSError *error = nil;
     [[SFUserAccountManager sharedInstance] saveAccountForUser:user error:&error];
     XCTAssertNil(error);

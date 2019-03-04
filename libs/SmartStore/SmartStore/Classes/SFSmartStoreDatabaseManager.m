@@ -26,11 +26,11 @@
 #import <SalesforceSDKCore/UIDevice+SFHardware.h>
 #import <SalesforceSDKCore/NSData+SFAdditions.h>
 #import <SalesforceSDKCore/NSString+SFAdditions.h>
-#import <SalesforceSDKCore/SFFileProtectionHelper.h>
-#import "SFSmartStoreUtils.h"
+#import <SalesforceSDKCommon/SFFileProtectionHelper.h>
 #import <SalesforceSDKCore/SFUserAccountManager.h>
 #import <SalesforceSDKCore/SFUserAccount.h>
 #import <SalesforceSDKCore/SFDirectoryManager.h>
+#import "SFSmartStoreUtils.h"
 #import "FMDatabase.h"
 #import "FMDatabaseQueue.h"
 #import "FMResultSet.h"
@@ -76,6 +76,8 @@ static NSString * const kSFSmartStoreVerifyReadDbErrorDesc = @"Could not read fr
 + (SFSmartStoreDatabaseManager *)sharedManagerForUser:(SFUserAccount *)user
 {
     @synchronized (self) {
+        if (user == nil) return nil;
+        
         NSString *userKey = [SFSmartStoreUtils userKeyForUser:user];
         SFSmartStoreDatabaseManager *mgr = sDatabaseManagers[userKey];
         if (mgr == nil) {
@@ -140,7 +142,29 @@ static NSString * const kSFSmartStoreVerifyReadDbErrorDesc = @"Could not read fr
     return [[self class] openDatabaseWithPath:fullDbFilePath key:key error:error];
 }
 
+// If you created your database with an app based on Mobile SDK 5.3.0 using cocoapod
+// Then the key was never applied, and the database can be read directly
+// This method checks for that situation and encrypt the database if needed
+- (void)fixFor530Bug:(NSString *)storeName key:(NSString *)key {
+    NSString *fullDbFilePath = [self fullDbFilePathForStoreName:storeName];
+    
+    __block BOOL needEncrypting = NO;
+    [[FMDatabaseQueue databaseQueueWithPath:fullDbFilePath] inDatabase:^(FMDatabase* db) {
+        // In the normal case, the db will not be readable - we don't want to be logging any errors
+        BOOL logsErrors = db.logsErrors;
+        db.logsErrors = NO;
+        needEncrypting = [[self class] verifyDatabaseAccess:db error:nil];
+        db.logsErrors = logsErrors;
+    }];
+    
+    if (needEncrypting) {
+        [[self class] encryptDbWithStoreName:storeName storePath:fullDbFilePath key:key error:nil];
+    }
+}
+
 - (FMDatabaseQueue *)openStoreQueueWithName:(NSString *)storeName key:(NSString *)key error:(NSError * __autoreleasing *)error {
+    [self fixFor530Bug:storeName key:key];
+    
     __block BOOL result = YES;
     NSString *fullDbFilePath = [self fullDbFilePathForStoreName:storeName];
     FMDatabaseQueue *queue = [FMDatabaseQueue databaseQueueWithPath:fullDbFilePath];
@@ -158,13 +182,9 @@ static NSString * const kSFSmartStoreVerifyReadDbErrorDesc = @"Could not read fr
 + (FMDatabase*) setKeyForDb:(FMDatabase*) db key:(NSString *)key error:(NSError **)error {
     [db setLogsErrors:YES];
     [db setCrashOnErrors:NO];
-    FMDatabase* unlockedDb = [self unlockDatabase:db key:key kdfIter:4000];
     
-    if (!unlockedDb) {
-        // You must be have created your database with SDK 3.2 or 3.1 and cocoapods
-        // And therefore you are using sqlcipher 3.1 with 64000 iterations
-        unlockedDb = [self unlockDatabase:db key:key kdfIter:64000];
-    }
+    FMDatabase* unlockedDb = [self unlockDatabase:db key:key];
+    
     if (!unlockedDb) {
         [SFSDKSmartStoreLogger d:[self class] format:@"Couldn't open store db at: %@ error: %@", [db databasePath],[db lastErrorMessage]];
         if (error != nil)
@@ -174,10 +194,15 @@ static NSString * const kSFSmartStoreVerifyReadDbErrorDesc = @"Could not read fr
     return unlockedDb;
 }
 
-+ (FMDatabase*) unlockDatabase:(FMDatabase*)db key:(NSString*)key kdfIter:(int)kdfIter {
++ (FMDatabase*) unlockDatabase:(FMDatabase*)db key:(NSString*)key {
     if ([db open]) {
-        NSString* pragmaQuery = [NSString stringWithFormat:@"PRAGMA cipher_default_kdf_iter = '%d'", kdfIter];
-        [[db executeQuery:pragmaQuery] close];
+        // Using sqlcipher 3.x default settings
+        // => should open 3.x databases without any migration
+        [[db executeQuery:@"PRAGMA cipher_default_compatibility = 3"] close];
+        // Using sqlcipher 2.x kdf iter because 3.x default (64000) and 4.x default (256000) are too slow
+        // => should open 2.x databases without any migration
+        [[db executeQuery:@"PRAGMA cipher_default_kdf_iter = 4000"] close];
+
         if(key) {
             [db setKey:key];
         }

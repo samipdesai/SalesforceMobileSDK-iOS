@@ -25,13 +25,17 @@
  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#import "SFSDKViewController.h"
 
 @class SFLoginViewController;
 @class SFSDKLoginHost;
+@class SFSDKLoginViewControllerConfig;
+@class SFSDKLoginHostListViewController;
 
 /**
  * Delegate protocol for the owner of SFLoginViewController.
  */
+NS_SWIFT_NAME(SalesforceLoginViewControllerDelegate)
 @protocol SFLoginViewControllerDelegate <NSObject>
 
 @optional
@@ -45,14 +49,11 @@
 
 @end
 
-
 /** The Salesforce login screen view.
  */
-@interface SFLoginViewController : UIViewController
+NS_SWIFT_NAME(SalesforceLoginViewController)
+@interface SFLoginViewController : SFSDKViewController
 
-/** Returns a shared singleton of `SFLoginViewController` class.
- */
-+(_Nonnull instancetype)sharedInstance;
 
 /**
  * The delegate representing the owner of this object.
@@ -65,23 +66,67 @@
 @property (nonatomic, strong, nullable) IBOutlet UIView *oauthView;
 
 /** Specify the font to use for navigation bar header text.*/
-@property (nonatomic, strong, nullable) UIFont * navBarFont;
+@property (nonatomic, strong, nullable) UIFont * navBarFont NS_SWIFT_NAME(navigationBarFont);
 
 /** Specify the text color to use for navigation bar header text. */
-@property (nonatomic, strong, nullable) UIColor * navBarTextColor;
+@property (nonatomic, strong, nullable) UIColor * navBarTintColor  NS_SWIFT_NAME(navigationBarTintColor);
+
+/** Specify the text color to use for navigation bar header text. */
+@property (nonatomic, strong, nullable) UIColor * navBarTitleColor  NS_SWIFT_NAME(navigationBarTitleColor);
 
 /** Specify navigation bar color. This color will be used by the login view header.
  */
-@property (nonatomic, strong, nullable) UIColor *navBarColor;
+@property (nonatomic, strong, nullable) UIColor *navBarColor NS_SWIFT_NAME(navigationBarColor);
 
 /** Specify visibility of nav bar. This property will be used to hide/show the nav bar*/
-@property (nonatomic) BOOL showNavbar;
+@property (nonatomic) BOOL showNavbar NS_SWIFT_NAME(showsNavigationBar);
 
 /** Specifiy the visibility of the settings icon. This property will be used to hide/show the settings icon*/
-@property (nonatomic) BOOL showSettingsIcon;
+@property (nonatomic) BOOL showSettingsIcon NS_SWIFT_NAME(showsSettingsIcon);
+
+/** Specify all display properties in a config. All the above properties are backed by
+ a config object */
+@property (nonatomic, strong, nonnull) SFSDKLoginViewControllerConfig *config;
+
+/** Get the instance of nav bar. Use this property to get the instance of navBar*/
+@property (nonatomic, strong, readonly, nullable) UINavigationBar *navBar;
 
 /** Applies the view's style attributes to the given navigation bar.
  @param navigationBar The navigation bar that the style is applied to.
  */
 - (void)styleNavigationBar:(nullable UINavigationBar *)navigationBar;
+
+/** Present the Host List View.
+ */
+- (void)showHostListView;
+
+/** Hide the Host List View.
+ @param animated Indicates whether or not the hiding should be animated.
+ */
+- (void)hideHostListView:(BOOL)animated;
+
+/** Factory Method to create the back button.
+ */
+- (nonnull UIBarButtonItem *)createBackButton;
+
+/** Factory Method to create the settings button.
+ */
+- (nonnull UIBarButtonItem *)createSettingsButton;
+
+/** Factory Method to create the navigation title.
+ */
+- (nonnull UIView *)createTitleItem;
+
+/** Logic to show back button.
+ */
+- (BOOL)shouldShowBackButton;
+
+/** Back Button was pressed by user
+ */
+- (void)handleBackButtonAction;
+
+/** User Selected a host from the host list
+ @param host SFSDKLoginHost
+ */
+- (void)handleLoginHostSelectedAction:(nonnull SFSDKLoginHost *)host;
 @end

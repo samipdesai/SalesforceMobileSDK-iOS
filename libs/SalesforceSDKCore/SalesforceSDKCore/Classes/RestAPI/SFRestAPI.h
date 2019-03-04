@@ -33,23 +33,23 @@ NS_ASSUME_NONNULL_BEGIN
  * Domain used for errors reported by the rest API (non HTTP errors)
  * (for example, passing an invalid SOQL string when doing a query)
  */
-extern NSString* const kSFRestErrorDomain;
+extern NSString* const kSFRestErrorDomain NS_SWIFT_NAME(SFRestErrorDomain);
 /*
  * Error code used for all rest API errors (non HTTP errors)
  * (for example, passing an invalid SOQL string when doing a query)
  */
-extern NSInteger const kSFRestErrorCode;
+extern NSInteger const kSFRestErrorCode NS_SWIFT_NAME(SFRestErrorCode);
 
 /*
- * Default API version (currently "v39.0")
+ * Default API version (currently "v44.0")
  * You can override this by using setApiVersion:
  */
-extern NSString* const kSFRestDefaultAPIVersion;
+extern NSString* const kSFRestDefaultAPIVersion NS_SWIFT_NAME(SFRestDefaultAPIVersion);
 
 /*
  * Misc keys appearing in requests
  */
-extern NSString* const kSFRestIfUnmodifiedSince;
+extern NSString* const kSFRestIfUnmodifiedSince NS_SWIFT_NAME(SFRestIfUnmodifiedSince);
 
 /**
  Main class used to issue REST requests to the standard Force.com REST API.
@@ -133,39 +133,45 @@ extern NSString* const kSFRestIfUnmodifiedSince;
  The error passed will be a standard `RestKit` error with an error domain of `RKRestKitErrorDomain`. 
 
  */
+NS_SWIFT_NAME(RestClient)
 @interface SFRestAPI : NSObject
 
 /**
- * The REST API version used for all the calls. This could be "v21.0", "v22.0"...
- * The default value is `kSFRestDefaultAPIVersion` (currently "v39.0")
+ * The REST API version used for all the calls.
+ * The default value is `kSFRestDefaultAPIVersion` (currently "v44.0")
  */
 @property (nonatomic, strong) NSString *apiVersion;
 
 /**
  * The user associated with this instance of SFRestAPI.
  */
-@property (nonatomic, strong, readonly) SFUserAccount *user;
+@property (nonatomic, strong, readonly) SFUserAccount *user NS_SWIFT_NAME(userAccount);
 
 /**
  * Returns the singleton instance of `SFRestAPI` associated with the current user.
  */
-+ (SFRestAPI *)sharedInstance;
+@property (class, nonatomic, readonly) SFRestAPI *sharedInstance NS_SWIFT_NAME(shared);
+
+/**
+ * Returns the singleton instance of `SFRestAPI` for unauthenticated calls.
+ */
+@property (class, nonatomic, readonly) SFRestAPI *sharedGlobalInstance NS_SWIFT_NAME(sharedGlobal);
 
 /**
  * Returns the singleton instance of `SFRestAPI` associated with the specified user.
  */
-+ (SFRestAPI *)sharedInstanceWithUser:(nonnull SFUserAccount *)user;
++ (nullable SFRestAPI *)sharedInstanceWithUser:(nonnull SFUserAccount *)userAccount NS_SWIFT_NAME(restClient(for:));
 
 /**
  * Specifies whether the current execution is a test run or not.
  @param isTestRun YES if this is a test run
  */
-+ (void) setIsTestRun:(BOOL)isTestRun;
++ (void)setIsTestRun:(BOOL)isTestRun NS_SWIFT_UNAVAILABLE("");
 
 /**
  * Specifies whether the current execution is a test run or not.
  */
-+ (BOOL) getIsTestRun;
++ (BOOL)getIsTestRun NS_SWIFT_UNAVAILABLE("");
 
 /**
  * Clean up due to host change or logout.
@@ -188,6 +194,12 @@ extern NSString* const kSFRestIfUnmodifiedSince;
 ///---------------------------------------------------------------------------------------
 /// @name SFRestRequest factory methods
 ///---------------------------------------------------------------------------------------
+
+/**
+ * Returns an `SFRestRequest` which gets information aassociated with the current user.
+ * @see https://help.salesforce.com/articleView?id=remoteaccess_using_userinfo_endpoint.htm
+ */
+- (SFRestRequest *)requestForUserInfo;
 
 /**
  * Returns an `SFRestRequest` which lists summary information about each
@@ -227,6 +239,15 @@ extern NSString* const kSFRestIfUnmodifiedSince;
  * @see http://www.salesforce.com/us/developer/docs/api_rest/Content/resources_sobject_describe.htm
  */
 - (SFRestRequest *)requestForDescribeWithObjectType:(NSString *)objectType;
+
+/**
+ * Returns an `SFRestRequest` which provides layout data for the specified object and layout type.
+ *
+ * @param objectType Object type. For example, "Account".
+ * @param layoutType Layout type. Could be "Full" or "Compact". Default is "Full".
+ * @see https://developer.salesforce.com/docs/atlas.en-us.uiapi.meta/uiapi/ui_api_resources_record_layout.htm
+ */
+- (SFRestRequest *)requestForLayoutWithObjectType:(nonnull NSString *)objectType layoutType:(nullable NSString *)layoutType;
 
 /**
  * Returns an `SFRestRequest` which retrieves field values for a record of the given type.
@@ -345,7 +366,7 @@ extern NSString* const kSFRestIfUnmodifiedSince;
  *               to return values; for example, "Account,Contact".
  * @see  http://www.salesforce.com/us/developer/docs/api_rest/Content/resources_search_layouts.htm
  */
-- (SFRestRequest *)requestForSearchResultLayout:(NSString*)objectList;
+  - (SFRestRequest *)requestForSearchResultLayout:(NSString*)objectList;
 
 /**
  * Retursn an `SFRestRequest` which executes a batch of requests.

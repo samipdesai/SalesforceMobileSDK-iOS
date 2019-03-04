@@ -28,7 +28,7 @@
 #import "SFSyncUpTarget.h"
 #import <SmartStore/SFSmartStore.h>
 #import <SmartStore/SFSoupIndex.h>
-#import <SalesforceSDKCore/SFJsonUtils.h>
+#import <SalesforceSDKCommon/SFJsonUtils.h>
 
 // soups and soup fields
 NSString * const kSFSyncStateSyncsSoupName = @"syncs_soup";
@@ -48,6 +48,7 @@ NSString * const kSFSyncStateTotalSize = @"totalSize";
 NSString * const kSFSyncStateMaxTimeStamp = @"maxTimeStamp";
 NSString * const kSFSyncStateStartTime = @"startTime";
 NSString * const kSFSyncStateEndTime = @"endTime";
+NSString * const kSFSyncStateError = @"error";
 
 // Possible value for sync type
 NSString * const kSFSyncStateTypeDown = @"syncDown";
@@ -73,10 +74,13 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
 @property (nonatomic, strong, readwrite) SFSyncOptions* options;
 @property (nonatomic, readwrite) NSInteger startTime;
 @property (nonatomic, readwrite) NSInteger endTime;
+@property (nonatomic, readwrite) NSString* error;
 
 @end
 
 @implementation SFSyncState
+
+@synthesize error = _error;
 
 # pragma mark - Setup
 
@@ -112,11 +116,12 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
             kSFSyncStateProgress: [NSNumber numberWithInteger:0],
             kSFSyncStateTotalSize: [NSNumber numberWithInteger:-1],
             kSFSyncStateStartTime: [NSNumber numberWithInteger:0],
-            kSFSyncStateEndTime: [NSNumber numberWithInteger:0]
+            kSFSyncStateEndTime: [NSNumber numberWithInteger:0],
+            kSFSyncStateError: @""
     }];
     if (name) dict[kSFSyncStateName] = name;
     
-    if (name && [SFSyncState newByName:name store:store]) {
+    if (name && [SFSyncState byName:name store:store]) {
         [SFSDKSmartSyncLogger e:[self class] format:@"Failed to create sync down: there is already a sync with name:%@", name];
         return nil;
     }
@@ -127,7 +132,7 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
 }
 
 + (SFSyncState*)newSyncUpWithOptions:(SFSyncOptions *)options soupName:(NSString *)soupName store:(SFSmartStore *)store {
-    SFSyncUpTarget *target = [[SFSyncUpTarget alloc] init];
+    SFSyncUpTarget *target = [SFSyncUpTarget newFromDict:nil];
     return [self newSyncUpWithOptions:options target:target soupName:soupName name:nil store:store];
 }
 
@@ -141,11 +146,12 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
             kSFSyncStateProgress: [NSNumber numberWithInteger:0],
             kSFSyncStateTotalSize: [NSNumber numberWithInteger:-1],
             kSFSyncStateStartTime: [NSNumber numberWithInteger:0],
-            kSFSyncStateEndTime: [NSNumber numberWithInteger:0]
+            kSFSyncStateEndTime: [NSNumber numberWithInteger:0],
+            kSFSyncStateError: @""
     }];
     if (name) dict[kSFSyncStateName] = name;
     
-    if (name && [SFSyncState newByName:name store:store]) {
+    if (name && [SFSyncState byName:name store:store]) {
         [SFSDKSmartSyncLogger e:[self class] format:@"Failed to create sync up: there is already a sync with name:%@", name];
         return nil;
     }
@@ -159,7 +165,7 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
 
 #pragma mark - Save/retrieve/delete to/from smartstore
 
-+ (SFSyncState*) newById:(NSNumber*)syncId store:(SFSmartStore*)store {
++ (SFSyncState*)byId:(NSNumber *)syncId store:(SFSmartStore*)store {
     NSArray* retrievedDicts = [store retrieveEntries:@ [ syncId ] fromSoup:kSFSyncStateSyncsSoupName];
     if (retrievedDicts == nil || retrievedDicts.count == 0)
         return nil;
@@ -167,9 +173,9 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
     return sync;
 }
 
-+ (SFSyncState*) newByName:(NSString *)name store:(SFSmartStore*)store {
++ (SFSyncState*)byName:(NSString *)name store:(SFSmartStore*)store {
     NSNumber *syncId = [store lookupSoupEntryIdForSoupName:kSFSyncStateSyncsSoupName forFieldPath:kSFSyncStateSyncsSoupSyncName fieldValue:name error:nil];
-    return syncId == nil ? nil : [self newById:syncId store:store];
+    return syncId == nil ? nil : [self byId:syncId store:store];
 }
 
 
@@ -214,6 +220,7 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
     self.maxTimeStamp = [(NSNumber*) dict[kSFSyncStateMaxTimeStamp] longLongValue];
     self.startTime = [(NSNumber*) dict[kSFSyncStateStartTime] integerValue];
     self.endTime = [(NSNumber*) dict[kSFSyncStateEndTime] integerValue];
+    self.error = dict[kSFSyncStateError];
 }
 
 - (NSDictionary*) asDict {
@@ -230,6 +237,7 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
     dict[kSFSyncStateMaxTimeStamp] = [NSNumber numberWithLongLong:self.maxTimeStamp];
     dict[kSFSyncStateStartTime] = [NSNumber numberWithInteger:self.startTime];
     dict[kSFSyncStateEndTime] = [NSNumber numberWithInteger:self.endTime];
+    dict[kSFSyncStateError] = self.error;
     return dict;
 }
 
@@ -249,7 +257,7 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
 #pragma mark - Setter for status
 - (void) setStatus: (SFSyncStateStatus) newStatus
 {
-    if (_status == SFSyncStateStatusNew && newStatus == SFSyncStateStatusRunning) {
+    if (_status != SFSyncStateStatusRunning && newStatus == SFSyncStateStatusRunning) {
         self.startTime = [[NSDate date] timeIntervalSince1970] * 1000; // milliseconds expecteed
     }
     if (_status == SFSyncStateStatusRunning
@@ -294,7 +302,6 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
     if ([syncStatus isEqualToString:kSFSyncStateStatusDone]) {
         return SFSyncStateStatusDone;
     }
-    // Must be failed // if ([syncStatus isEqualToString:kSFSyncStateStatusFailed]) {
     return SFSyncStateStatusFailed;
 }
 
@@ -313,7 +320,6 @@ NSString * const kSFSyncStateMergeModeLeaveIfChanged = @"LEAVE_IF_CHANGED";
     if ([mergeMode isEqualToString:kSFSyncStateMergeModeLeaveIfChanged]) {
         return SFSyncStateMergeModeLeaveIfChanged;
     }
-    // if ([mergeMode isEqualToString:kSFSyncStateMergeModeOverwrite]) {
     return SFSyncStateMergeModeOverwrite;
 }
 

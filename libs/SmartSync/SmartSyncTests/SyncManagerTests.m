@@ -25,7 +25,6 @@
 #import "SyncManagerTestCase.h"
 #import "SFSyncUpdateCallbackQueue.h"
 #import "TestSyncUpTarget.h"
-#import <SmartStore/SFQuerySpec.h>
 #import <SalesforceSDKCore/SFSDKSoqlBuilder.h>
 #import <SalesforceSDKCore/SFSDKSoslBuilder.h>
 
@@ -35,31 +34,37 @@
  To test multiple round trip during refresh-sync-down, we need access to countIdsPerSoql
  */
 @interface SFRefreshSyncDownTarget ()
+
 @property (nonatomic, assign, readwrite) NSUInteger countIdsPerSoql;
+
 @end
 
 /**
  To test getRemoteIds
  */
 @interface SFSyncDownTarget ()
+
 - (void) getRemoteIds:(SFSmartSyncSyncManager*)syncManager
              localIds:(NSArray *)localIds
            errorBlock:(SFSyncDownTargetFetchErrorBlock)errorBlock
         completeBlock:(SFSyncDownTargetFetchCompleteBlock)completeBlock;
-@end
 
+@end
 
 /**
  Soql sync down target that pauses for a second at the beginning of the fetch
  */
 @interface SlowSoqlSyncDownTarget : SFSoqlSyncDownTarget
+
 @end
 
 /**
  To test addFilterForReSync 
  */
 @interface SFSoqlSyncDownTarget ()
+
 + (NSString*) addFilterForReSync:(NSString*)query modDateFieldName:(NSString *)modDateFieldName maxTimeStamp:(long long)maxTimeStamp;
+
 @end
 
 @implementation SlowSoqlSyncDownTarget
@@ -80,11 +85,11 @@
 
 @end
 
-
 @interface SyncManagerTests : SyncManagerTestCase
 {
     NSMutableDictionary* idToFields; // id -> {Name: xxx, Description: yyy}
 }
+
 @end
 
 @implementation SyncManagerTests
@@ -94,10 +99,8 @@
 - (void)tearDown {
     // Deleting test data
     [self deleteTestData];
-
     [super tearDown];
 }
-
 
 #pragma mark - tests
 /**
@@ -144,7 +147,7 @@
     // Deletes 1 account on the server and verifies the ghost record is cleared from the soup.
     [self deleteAccountsOnServer:@[accountIds[0]]];
     XCTestExpectation* cleanResyncGhosts = [self expectationWithDescription:@"cleanResyncGhosts"];
-    [self.syncManager cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus) {
+    [self.syncManager cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus, NSUInteger numRecords) {
         if (syncStatus == SFSyncStateStatusFailed || syncStatus == SFSyncStateStatusDone) {
                 [cleanResyncGhosts fulfill];
         }
@@ -154,6 +157,65 @@
 
     // Deletes the remaining accounts on the server.
     [self deleteAccountsOnServer:accountIds];
+}
+
+/**
+ * Tests clean ghosts when soup is populated through more than one sync down
+ */
+- (void) testCleanResyncGhostsWithMultipleSyncs
+{
+    [self createAccountsSoup];
+        
+    // Creates 6 accounts on the server.
+    NSArray* accountIds = [[self createAccountsOnServer:6] allKeys];
+    NSArray* accountIdsFirstSubset = [accountIds subarrayWithRange:NSMakeRange(0, 3)];  // id0, id1, id2
+    NSArray* accountIdsSecondSubset = [accountIds subarrayWithRange:NSMakeRange(2, 4)]; //           id2, id3, id4, id5
+
+    // Runs a first SOQL sync down target (bringing down id0, id1, id2)
+    NSNumber* firstSyncId = [NSNumber numberWithInteger:[self trySyncDown:SFSyncStateMergeModeLeaveIfChanged
+                                                                   target:[SFSoqlSyncDownTarget newSyncTarget:[NSString stringWithFormat:@"SELECT Id, Name FROM Account WHERE Id IN %@", [self buildInClause:accountIdsFirstSubset]]]
+                                                                 soupName:ACCOUNTS_SOUP
+                                                                totalSize:accountIdsFirstSubset.count
+                                                            numberFetches:1]];
+    [self checkDbExists:ACCOUNTS_SOUP ids:accountIdsFirstSubset idField:@"Id"];
+    [self checkDbSyncIdField:accountIdsFirstSubset soupName:ACCOUNTS_SOUP syncId:firstSyncId];
+
+    // Runs a second SOQL sync down target (bringing down id2, id3, id4, id5)
+    NSNumber* secondSyncId = [NSNumber numberWithInteger:[self trySyncDown:SFSyncStateMergeModeLeaveIfChanged
+                                                                    target:[SFSoqlSyncDownTarget newSyncTarget:[NSString stringWithFormat:@"SELECT Id, Name FROM Account WHERE Id IN %@", [self buildInClause:accountIdsSecondSubset]]]
+                                                                  soupName:ACCOUNTS_SOUP
+                                                                 totalSize:accountIdsSecondSubset.count
+                                                             numberFetches:1]];
+    [self checkDbExists:ACCOUNTS_SOUP ids:accountIdsSecondSubset idField:@"Id"];
+    [self checkDbSyncIdField:accountIdsSecondSubset soupName:ACCOUNTS_SOUP syncId:secondSyncId];
+
+    // Deletes id0, id2, id5 on the server
+    [self deleteAccountsOnServer:@[accountIds[0], accountIds[2], accountIds[5]]];
+
+    // Cleaning ghosts of first sync (should only remove id0)
+    XCTestExpectation* firstCleanExpectation = [self expectationWithDescription:@"firstCleanGhosts"];
+    [self.syncManager cleanResyncGhosts:firstSyncId completionStatusBlock:^(SFSyncStateStatus syncStatus, NSUInteger numRecords) {
+        if (syncStatus == SFSyncStateStatusFailed || syncStatus == SFSyncStateStatusDone) {
+            [firstCleanExpectation fulfill];
+        }
+    }];
+    [self waitForExpectationsWithTimeout:30.0 handler:nil];
+    [self checkDbExists:ACCOUNTS_SOUP ids:@[accountIds[1], accountIds[2], accountIds[3], accountIds[4], accountIds[5]] idField:@"Id"];
+    [self checkDbDeleted:ACCOUNTS_SOUP ids:@[accountIds[0]] idField:@"Id"];
+
+    // Cleaning ghosts of second sync (should remove id2 and id5)
+    XCTestExpectation* secondCleanExpectation = [self expectationWithDescription:@"secondCleanGhosts"];
+    [self.syncManager cleanResyncGhosts:secondSyncId completionStatusBlock:^(SFSyncStateStatus syncStatus, NSUInteger numRecords) {
+        if (syncStatus == SFSyncStateStatusFailed || syncStatus == SFSyncStateStatusDone) {
+            [secondCleanExpectation fulfill];
+        }
+    }];
+    [self waitForExpectationsWithTimeout:30.0 handler:nil];
+    [self checkDbExists:ACCOUNTS_SOUP ids:@[accountIds[1], accountIds[3], accountIds[4]] idField:@"Id"];
+    [self checkDbDeleted:ACCOUNTS_SOUP ids:@[accountIds[0], accountIds[2], accountIds[5]] idField:@"Id"];
+
+    // Deletes the remaining accounts on the server.
+    [self deleteAccountsOnServer:@[accountIds[1], accountIds[3], accountIds[4]]];
 }
 
 /**
@@ -179,7 +241,7 @@
     // Deletes 1 account on the server and verifies the ghost record is cleared from the soup.
     [self deleteAccountsOnServer:@[accountIds[0]]];
     XCTestExpectation* cleanResyncGhosts = [self expectationWithDescription:@"cleanResyncGhosts"];
-    [self.syncManager cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus) {
+    [self.syncManager cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus, NSUInteger numRecords) {
         if (syncStatus == SFSyncStateStatusFailed || syncStatus == SFSyncStateStatusDone) {
             [cleanResyncGhosts fulfill];
         }
@@ -223,7 +285,7 @@
     [NSThread sleepForTimeInterval:1]; //give server a second to settle to reflect in API
  
     XCTestExpectation* cleanResyncGhosts = [self expectationWithDescription:@"cleanResyncGhosts"];
-    [self.syncManager cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus) {
+    [self.syncManager cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus, NSUInteger numRecords) {
         if (syncStatus == SFSyncStateStatusFailed || syncStatus == SFSyncStateStatusDone) {
             [cleanResyncGhosts fulfill];
         }
@@ -246,7 +308,6 @@
     SFSmartSyncSyncManager *mgr3 = [SFSmartSyncSyncManager sharedInstanceForUser:self.currentUser storeName:kDefaultSmartStoreName];
     XCTAssertEqual(mgr1, mgr2, @"Sync managers should be the same.");
     XCTAssertEqual(mgr1, mgr3, @"Sync managers should be the same.");
-    
     NSString *storeName2 = @"AnotherStore";
     SFSmartSyncSyncManager *mgr4 = [SFSmartSyncSyncManager sharedInstance:self.currentUser];
     SFSmartStore *store2 = [SFSmartStore sharedStoreWithName:storeName2];
@@ -261,39 +322,6 @@
 }
 
 /**
- * Test serialization and deserialization of SFSyncUpTargets to and from NSDictionary objects.
- */
-- (void)testSyncUpTargetSerialization {
-    
-    // Default sync up target should be the base class.
-    SFSyncUpTarget *defaulttarget = [[SFSyncUpTarget alloc] init];
-    XCTAssertEqual([defaulttarget class], [SFSyncUpTarget class], @"Default class should be SFSyncUpTarget");
-    XCTAssertEqual(defaulttarget.targetType, SFSyncUpTargetTypeRestStandard, @"Sync sync up target type is incorrect.");
-    
-    // Explicit rest sync up target type creates base class.
-    NSDictionary *restDict = @{ kSFSyncTargetTypeKey: @"rest" };
-    SFSyncUpTarget *resttarget = [SFSyncUpTarget newFromDict:restDict];
-    XCTAssertEqual([resttarget class], [SFSyncUpTarget class], @"Rest class should be SFSyncUpTarget");
-    XCTAssertEqual(resttarget.targetType, SFSyncUpTargetTypeRestStandard, @"Sync sync up target type is incorrect.");
-    
-    // Custom sync up target
-    TestSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] init];
-    NSDictionary *customDict = [customTarget asDict];
-    XCTAssertEqualObjects(customDict[kSFSyncTargetiOSImplKey], NSStringFromClass([TestSyncUpTarget class]), @"Custom class is incorrect.");
-    SFSyncUpTarget *customTargetFromDict = [SFSyncUpTarget newFromDict:customDict];
-    XCTAssertEqual([customTargetFromDict class], [TestSyncUpTarget class], @"Custom class is incorrect.");
-}
-
-/**
- Test that sync up uses SFSyncUpTarget by default
- */
-- (void)testDefaultSyncUpTarget {
-    SFSyncOptions *options = [SFSyncOptions newSyncOptionsForSyncUp:@[NAME, DESCRIPTION] mergeMode:SFSyncStateMergeModeOverwrite];
-    SFSyncState *syncUpState = [SFSyncState newSyncUpWithOptions:options soupName:ACCOUNTS_SOUP store:self.store];
-    XCTAssertEqual([syncUpState.target class], [SFSyncUpTarget class], @"Default sync up target should be SFSyncUpTarget");
-}
-
-/**
  * getSyncStatus should return null for invalid sync id
  */
 - (void)testGetSyncStatusForInvalidSyncId
@@ -301,7 +329,6 @@
     SFSyncState* sync = [self.syncManager getSyncStatus:[NSNumber numberWithInt:-1]];
     XCTAssertTrue(sync == nil, @"Sync status should be nil");
 }
-
 
 /**
  * Sync down the test accounts, check smart store, check status during sync
@@ -345,6 +372,47 @@
     
     // Check db
     [self checkDb:idToFields];
+}
+
+/**
+ * Test for sync down with metadata target.
+ */
+- (void)testSyncDownForMetadataTarget {
+    NSArray* indexSpecs = @[
+                            [[SFSoupIndex alloc] initWithPath:@"Id" indexType:kSoupIndexTypeString columnName:nil]
+                            ];
+    [self.store registerSoup:ACCOUNTS_SOUP withIndexSpecs:indexSpecs error:nil];
+    [self trySyncDown:SFSyncStateMergeModeOverwrite target:[SFMetadataSyncDownTarget newSyncTarget:ACCOUNT_TYPE] soupName:ACCOUNTS_SOUP totalSize:1 numberFetches:1];
+    NSString* smartSql = @"SELECT {accounts:_soup} FROM {accounts}";
+    SFQuerySpec* querySpec = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:1];
+    NSArray *rows = [self.store queryWithQuerySpec:querySpec pageIndex:0 error:nil];
+    rows = [self.store queryWithQuerySpec:querySpec pageIndex:0 error:nil];
+    XCTAssertEqual(rows.count, 1, @"Number of rows should be 1");
+    NSDictionary *metadata = rows[0][0];
+    XCTAssertNotNil(metadata, @"Metadata should not be nil");
+    NSString *keyPrefix = metadata[@"keyPrefix"];
+    NSString *label = metadata[@"label"];
+    XCTAssertEqualObjects(keyPrefix, @"001", @"Key prefix should be 001");
+    XCTAssertEqualObjects(label, ACCOUNT_TYPE, @"Label should be Account");
+}
+
+/**
+ * Test for sync down with layout target.
+ */
+- (void)testSyncDownForLayoutTarget {
+    NSArray* indexSpecs = @[
+                            [[SFSoupIndex alloc] initWithPath:@"Id" indexType:kSoupIndexTypeString columnName:nil]
+                            ];
+    [self.store registerSoup:ACCOUNTS_SOUP withIndexSpecs:indexSpecs error:nil];
+    [self trySyncDown:SFSyncStateMergeModeOverwrite target:[SFLayoutSyncDownTarget newSyncTarget:ACCOUNT_TYPE layoutType:@"Compact"] soupName:ACCOUNTS_SOUP totalSize:1 numberFetches:1];
+    NSString* smartSql = @"SELECT {accounts:_soup} FROM {accounts}";
+    SFQuerySpec* querySpec = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:1];
+    NSArray *rows = [self.store queryWithQuerySpec:querySpec pageIndex:0 error:nil];
+    XCTAssertEqual(rows.count, 1, @"Number of rows should be 1");
+    NSDictionary *layout = rows[0][0];
+    XCTAssertNotNil(layout, @"Layout should not be nil");
+    NSString *layoutType = layout[@"layoutType"];
+    XCTAssertEqualObjects(layoutType, @"Compact", @"Layout type should be Compact");
 }
 
 /**
@@ -465,8 +533,6 @@
     
     // Check status updates
     [self checkStatus:[queue getNextSyncUpdate] expectedType:SFSyncStateSyncTypeDown expectedId:[syncId integerValue] expectedTarget:target expectedOptions:options expectedStatus:SFSyncStateStatusRunning expectedProgress:0 expectedTotalSize:-1]; // we get an update right away before getting records to sync
-    
-    
     for (NSNumber* expectedProgress in @[@0,@10,@10,@20,@20,@20,@20,@20,@20,@20,@20]) {
         SFSyncState* state = [queue getNextSyncUpdate];
         [self checkStatus:state expectedType:SFSyncStateSyncTypeDown expectedId:[syncId integerValue] expectedTarget:target expectedOptions:options expectedStatus:SFSyncStateStatusRunning expectedProgress:expectedProgress.unsignedIntegerValue expectedTotalSize:idToFields.count]; // totalSize is off for resync of sync-down-target if not all recrods got updated
@@ -479,7 +545,6 @@
     // Check sync time stamp
     XCTAssertTrue([self.syncManager getSyncStatus:syncId].maxTimeStamp > maxTimeStamp);
 }
-
 
 /**
  * Tests if ghost records are cleaned locally for a refresh target.
@@ -503,7 +568,7 @@
     NSString* idDeleted = accountIds[0];
     [self deleteAccountsOnServer:@[idDeleted]];
     XCTestExpectation* cleanResyncGhosts = [self expectationWithDescription:@"cleanResyncGhosts"];
-    [self.syncManager cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus) {
+    [self.syncManager cleanResyncGhosts:syncId completionStatusBlock:^(SFSyncStateStatus syncStatus, NSUInteger numRecords) {
         if (syncStatus == SFSyncStateStatusFailed || syncStatus == SFSyncStateStatusDone) {
             [cleanResyncGhosts fulfill];
         }
@@ -519,166 +584,6 @@
     [self checkDb:idToFieldsLeft];
     [self checkDbDeleted:ACCOUNTS_SOUP ids:@[idDeleted] idField:@"Id"];
 }
-
-/**
- * Sync down the test accounts, modify none, sync up, check smartstore and server afterwards
- */
--(void)testSyncUpWithNoLocalUpdates
-{
-    // Create test data
-    [self createTestData];
-    
-    // first sync down
-    [self trySyncDown:SFSyncStateMergeModeOverwrite];
-    
-    // Sync up
-    [self trySyncUp:0 mergeMode:SFSyncStateMergeModeOverwrite];
-    
-    // Check that db doesn't show entries as locally modified
-    [self checkDbStateFlags:[idToFields allKeys] soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:NO];
-
-    // Check server
-    [self checkServer:idToFields];
-}
-
-
-/**
- * Sync down the test accounts, modify a few, sync up, check smartstore and server afterwards
- */
--(void)testSyncUpWithLocallyUpdatedRecords
-{
-    // Create test data
-    [self createTestData];
-    
-    // first sync down
-    [self trySyncDown:SFSyncStateMergeModeOverwrite];
-   
-    // Make some local change
-    NSDictionary* idToFieldsLocallyUpdated = [self makeSomeLocalChanges];
-    
-    // Sync up
-    [self trySyncUp:idToFieldsLocallyUpdated.count mergeMode:SFSyncStateMergeModeOverwrite];
-    
-    // Check that db doesn't show entries as locally modified anymore
-    [self checkDbStateFlags:[idToFieldsLocallyUpdated allKeys] soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:NO];
-
-    // Check server
-    [self checkServer:idToFieldsLocallyUpdated];
-}
-
-/**
- * Sync down the test accounts, modify a few, sync up specifying update field list, check smartstore and server afterwards
- */
--(void)testSyncUpWithUpdateFieldList
-{
-    // Create test data
-    [self createTestData];
-    
-    // first sync down
-    [self trySyncDown:SFSyncStateMergeModeOverwrite];
-    
-    // Make some local change
-    NSDictionary* idToFieldsLocallyUpdated = [self makeSomeLocalChanges];
-    
-    // Sync up with update field list including only name
-    SFSyncUpTarget *target = [[SFSyncUpTarget alloc] initWithCreateFieldlist:nil updateFieldlist:@[NAME]];
-    [self trySyncUp:idToFieldsLocallyUpdated.count target:target mergeMode:SFSyncStateMergeModeOverwrite];
-
-    // Check that db doesn't show entries as locally modified anymore
-    [self checkDbStateFlags:[idToFieldsLocallyUpdated allKeys] soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:NO];
-
-    // Check server - make sure only name was updated
-    NSMutableDictionary* idToFieldsExpectedOnServer = [NSMutableDictionary new];
-    for (NSString* recordId in idToFieldsLocallyUpdated) {
-        idToFieldsExpectedOnServer[recordId] = @{NAME: idToFieldsLocallyUpdated[recordId][NAME], DESCRIPTION:idToFields[recordId][DESCRIPTION]}; // should have modified name but original description
-    }
-    [self checkServer:idToFieldsExpectedOnServer];
-    
-}
-
-/**
- * Create accounts locally, sync up specifying create field list, check smartstore and server afterwards
- */
--(void)testSyncUpWithCreateFieldList
-{
-    // Create test data
-    [self createTestData];
-    
-    // Create a few entries locally
-    NSArray* names = @[ [self createAccountName], [self createAccountName], [self createAccountName]];
-    [self createAccountsLocally:names];
-    
-    // Sync up with create field list including only name
-    SFSyncUpTarget *target = [[SFSyncUpTarget alloc] initWithCreateFieldlist:@[NAME] updateFieldlist:nil];
-    [self trySyncUp:names.count target:target mergeMode:SFSyncStateMergeModeOverwrite];
-
-    // Check that db doesn't show entries as locally created anymore and that they use sfdc id
-    NSDictionary* idToFieldsCreated = [self getIdToFieldsByName:ACCOUNTS_SOUP fieldNames:@[NAME, DESCRIPTION] nameField:NAME names:names];
-    [self checkDbStateFlags:[idToFieldsCreated allKeys] soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:NO];
-
-    // Check server - make sure only name was set
-    NSMutableDictionary* idToFieldsExpectedOnServer = [NSMutableDictionary new];
-    for (NSString* recordId in idToFieldsCreated) {
-        idToFieldsExpectedOnServer[recordId] = @{NAME: idToFieldsCreated[recordId][NAME], DESCRIPTION:[NSNull null]}; // should have name but no description
-    }
-    [self checkServer:idToFieldsExpectedOnServer byNames:names];
-    
-    // Adding to idToFields so that they get deleted in tearDown
-    [idToFields addEntriesFromDictionary:idToFieldsCreated];
-}
-
-/**
- * Sync down the test accounts, modify a few, create accounts locally, sync up specifying different create and update field list,
- * check smartstore and server afterwards
- */
--(void)testSyncUpWithCreateAndUpdateFieldList
-{
-    // Create test data
-    [self createTestData];
-    
-    // first sync down
-    [self trySyncDown:SFSyncStateMergeModeOverwrite];
-    
-    // Make some local change
-    NSDictionary* idToFieldsLocallyUpdated = [self makeSomeLocalChanges];
-    NSMutableArray* namesOfUpdated = [NSMutableArray new];
-    for (NSString* recordId in idToFieldsLocallyUpdated) {
-        [namesOfUpdated addObject:idToFieldsLocallyUpdated[recordId][NAME]];
-    }
-    
-    // Create a few entries locally
-    NSArray* namesOfCreated = @[ [self createAccountName], [self createAccountName], [self createAccountName]];
-    [self createAccountsLocally:namesOfCreated];
-    
-    // Sync up with different create and update field lists
-    SFSyncUpTarget *target = [[SFSyncUpTarget alloc] initWithCreateFieldlist:@[NAME] updateFieldlist:@[DESCRIPTION]];
-    [self trySyncUp:(namesOfUpdated.count + namesOfCreated.count) target:target mergeMode:SFSyncStateMergeModeOverwrite];
-    
-    // Check that db doesn't show entries as locally created anymore and that they use sfdc id
-    NSDictionary* idToFieldsCreated = [self getIdToFieldsByName:ACCOUNTS_SOUP fieldNames:@[NAME, DESCRIPTION] nameField:NAME names:namesOfCreated];
-    [self checkDbStateFlags:[idToFieldsCreated allKeys] soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:NO];
-
-    // Make sure all the locally created records have synched up
-    XCTAssertEqual(namesOfCreated.count, idToFieldsCreated.count);
-    
-    // Check server - make sure updated records only have updated description - make sure created records only have name
-    NSMutableDictionary* idToFieldsExpectedOnServer = [NSMutableDictionary new];
-    for (NSString* recordId in idToFieldsLocallyUpdated) {
-        idToFieldsExpectedOnServer[recordId] = @{NAME: idToFields[recordId][NAME], DESCRIPTION:idToFieldsLocallyUpdated[recordId][DESCRIPTION]}; // updated records should have original name and updated description
-    }
-    for (NSString* recordId in idToFieldsCreated) {
-        idToFieldsExpectedOnServer[recordId] = @{NAME: idToFieldsCreated[recordId][NAME], DESCRIPTION:[NSNull null]}; // created records should have name but no description
-    }
-
-    // Make sure we found all the records on the server
-    NSArray* allNames = [namesOfCreated arrayByAddingObjectsFromArray:namesOfUpdated];
-    XCTAssertEqual(allNames.count, idToFieldsExpectedOnServer.count);
-    [self checkServer:idToFieldsExpectedOnServer];
-    
-    // Adding to idToFields so that they get deleted in tearDown
-    [idToFields addEntriesFromDictionary:idToFieldsCreated];
-}
-
 
 /**
  Test sync up of updated records with custom target
@@ -702,40 +607,6 @@
     
     // Check that db doesn't show entries as locally modified anymore
     [self checkDbStateFlags:[idToFieldsLocallyUpdated allKeys] soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:NO];
-}
-
-/**
- * Sync down the test accounts, modify a few, sync up with merge mode LEAVE_IF_CHANGED, check smartstore and server afterwards
- */
-- (void)testSyncUpWithLocallyUpdatedRecordsWithoutOverwrite
-{
-    // Create test data
-    [self createTestData];
-    
-    // First sync down
-    [self trySyncDown:SFSyncStateMergeModeLeaveIfChanged];
-    
-    // Make some local change
-    NSDictionary* idToFieldsLocallyUpdated = [self makeSomeLocalChanges];
-    NSArray* ids = [idToFieldsLocallyUpdated allKeys];
-
-    // Update entries on server
-    NSMutableDictionary* idToFieldsRemotelyUpdated = [NSMutableDictionary new];
-    for (NSString* accountId in ids) {
-        NSString* updatedName =  [NSString stringWithFormat:@"%@_updated_again", idToFields[accountId][NAME]];
-        NSString* updatedDescription =  [NSString stringWithFormat:@"%@_updated_again", idToFields[accountId][DESCRIPTION]];
-        idToFieldsRemotelyUpdated[accountId] = @{NAME:updatedName, DESCRIPTION:updatedDescription};
-    }
-    [self updateAccountsOnServer:idToFieldsRemotelyUpdated];
-    
-    // Sync up
-    [self trySyncUp:idToFieldsLocallyUpdated.count mergeMode:SFSyncStateMergeModeLeaveIfChanged];
-    
-    // Check that db does still shows entries as locally modified
-    [self checkDbStateFlags:ids soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:YES expectedLocallyDeleted:NO];
-
-    // Check server
-    [self checkServer:idToFieldsRemotelyUpdated];
 }
 
 /**
@@ -764,81 +635,6 @@
 }
 
 /**
- * Create accounts locally, sync up with merge mode SFSyncStateMergeModeOverwrite, check smartstore and server afterwards
- */
-- (void)testSyncUpWithLocallyCreatedRecords
-{
-    [self trySyncUpWithLocallyCreatedRecords:SFSyncStateMergeModeOverwrite];
-}
-
-/**
- * Create accounts locally, sync up with merge mode SFSyncStateMergeModeLeaveIfChanged, check smartstore and server afterwards
- */
-- (void)testSyncUpWithLocallyCreatedRecordsWithoutOverwrite
-{
-    [self trySyncUpWithLocallyCreatedRecords:SFSyncStateMergeModeLeaveIfChanged];
-    
-}
-
--(void) trySyncUpWithLocallyCreatedRecords:(SFSyncStateMergeMode)syncUpMergeMode
-{
-    // Create test data
-    [self createTestData];
-    
-    // Create a few entries locally
-    NSArray* names = @[ [self createAccountName], [self createAccountName], [self createAccountName]];
-    [self createAccountsLocally:names];
-   
-    // Sync up
-    [self trySyncUp:3 mergeMode:syncUpMergeMode];
-    
-    // Check that db doesn't show entries as locally created anymore and that they use sfdc id
-    NSDictionary* idToFieldsCreated = [self getIdToFieldsByName:ACCOUNTS_SOUP fieldNames:@[NAME, DESCRIPTION] nameField:NAME names:names];
-    [self checkDbStateFlags:[idToFieldsCreated allKeys] soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:NO];
-
-    // Check server
-    [self checkServer:idToFieldsCreated byNames:names];
-    
-    // Adding to idToFields so that they get deleted in tearDown
-    [idToFields addEntriesFromDictionary:idToFieldsCreated];
-}
-
-/**
- * Create accounts locally, delete them locally, sync up with merge mode SFSyncStateMergeModeLeaveIfChanged, check smartstore
- *
- * Ideally an application that deletes locally created records should simply remove them from the smartstore
- * But if records are kept in the smartstore and are flagged as created and deleted (or just deleted), then
- * sync up should not throw any error and the records should end up being removed from the smartstore
- *
- */
--(void) testSyncUpWithLocallyCreatedAndDeletedRecords
-{
-    // Create test data
-    [self createTestData];
-    
-    // Create a few entries locally
-    NSArray* names = @[ [self createAccountName], [self createAccountName], [self createAccountName]];
-    [self createAccountsLocally:names];
-    NSDictionary *idToFieldsCreated = [self getIdToFieldsByName:ACCOUNTS_SOUP fieldNames:@[NAME, DESCRIPTION] nameField:NAME names:names];
-
-    // Delete a few entries locally
-    NSArray* allIds = [idToFieldsCreated allKeys];
-    NSArray* idsLocallyDeleted = @[ allIds[0], allIds[1], allIds[2] ];
-    [self deleteAccountsLocally:idsLocallyDeleted];
-    
-    // Sync up
-    [self trySyncUp:3 mergeMode:SFSyncStateMergeModeLeaveIfChanged];
-    
-    // Check that db doesn't doesn't contain those entries anymore
-    NSString* idsClause = [self buildInClause:idsLocallyDeleted];
-    NSString* smartSql = [NSString stringWithFormat:@"SELECT {accounts:_soup} FROM {accounts} WHERE {accounts:Id} IN %@", idsClause];
-    SFQuerySpec* query = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:idsLocallyDeleted.count];
-    NSArray* rows = [self.store queryWithQuerySpec:query pageIndex:0 error:nil];
-    XCTAssertEqual(0, rows.count);
-}
-
-
-/**
  Test custom sycn up with locally created records
  */
 - (void)testCustomSyncUpWithLocallyCreatedRecords
@@ -851,202 +647,12 @@
     [self createAccountsLocally:names];
     
     // Sync up
-    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateSameAsLocal
-                                                                                     sendRemoteModError:NO
-                                                                                        sendSyncUpError:NO];
+    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateSameAsLocal sendRemoteModError:NO sendSyncUpError:NO];
     [self trySyncUp:3 target:customTarget mergeMode:SFSyncStateMergeModeOverwrite];
     
     // Check that db doesn't show entries as locally created anymore and that they use returned id
     NSDictionary* idToFieldsCreated = [self getIdToFieldsByName:ACCOUNTS_SOUP fieldNames:@[NAME, DESCRIPTION] nameField:NAME names:names];
     [self checkDbStateFlags:[idToFieldsCreated allKeys] soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:NO];
-}
-
-/**
- * Sync down the test accounts, delete a few, sync up, check smartstore and server afterwards
- */
--(void) testSyncUpWithLocallyDeletedRecords
-{
-    // Create test data
-    [self createTestData];
-    
-    // First sync down
-    [self trySyncDown:SFSyncStateMergeModeOverwrite];
-    
-    // Delete a few entries locally
-    NSArray* allIds = [idToFields allKeys];
-    NSArray* idsLocallyDeleted = @[ allIds[0], allIds[1], allIds[2] ];
-    [self deleteAccountsLocally:idsLocallyDeleted];
-    
-    // Sync up
-    [self trySyncUp:3 mergeMode:SFSyncStateMergeModeOverwrite];
-    
-    // Check that db doesn't have deleted entries
-    NSString* idsClause = [self buildInClause:idsLocallyDeleted];
-    NSString* smartSql = [NSString stringWithFormat:@"SELECT {accounts:_soup} FROM {accounts} WHERE {accounts:Id} IN %@", idsClause];
-    SFQuerySpec* query = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:idsLocallyDeleted.count];
-    NSArray* rows = [self.store queryWithQuerySpec:query pageIndex:0 error:nil];
-    XCTAssertEqual(0, rows.count);
-    
-    // Check server
-    NSString* soql = [NSString stringWithFormat:@"SELECT Id, Name FROM Account WHERE Id IN %@", idsClause];
-    SFRestRequest* request = [[SFRestAPI sharedInstance] requestForQuery:soql];
-    NSArray* records = [self sendSyncRequest:request][RECORDS];
-    XCTAssertEqual(0, records.count);
-}
-
-/**
- * Sync down the test accounts, delete account on server, update same account locally, sync up, check smartstore and server afterwards
- */
--(void) testSyncUpWithLocallyUpdatedRemotelyDeletedRecords
-{
-    // Create test data
-    [self createTestData];
-
-    // First sync down
-    [self trySyncDown:SFSyncStateMergeModeOverwrite];
-    
-    // Make some local change
-    NSDictionary* idToFieldsLocallyUpdated = [self makeSomeLocalChanges];
-    NSMutableArray* names = [NSMutableArray new];
-    for (NSDictionary* fields in [idToFieldsLocallyUpdated allValues]) {
-        [names addObject:fields[NAME]];
-    }
-    
-    // Delete record on server
-    NSString* remotelyDeletedId = [idToFieldsLocallyUpdated allKeys][0];
-    [self deleteAccountsOnServer:@[remotelyDeletedId]];
-
-    // Name of locally updated record that was deleted on server
-    NSString* locallyUpdatedRemotelyDeletedName = idToFieldsLocallyUpdated[remotelyDeletedId][NAME];
-    
-    // Sync up
-    [self trySyncUp:names.count mergeMode:SFSyncStateMergeModeOverwrite];
-    
-    // Check that db doesn't show entries as locally updated anymore
-    NSString* namesClause = [self buildInClause:names];
-    NSString* smartSql = [NSString stringWithFormat:@"SELECT {accounts:_soup} FROM {accounts} WHERE {accounts:Name} IN %@", namesClause];
-    SFQuerySpec* query = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:names.count];
-    NSArray* rows = [self.store queryWithQuerySpec:query pageIndex:0 error:nil];
-    NSMutableDictionary* idToFieldsUpdated = [NSMutableDictionary new];
-    for (NSArray* row in rows) {
-        NSDictionary* account = row[0];
-        NSString* accountId = account[ID];
-        NSString* accountName = account[NAME];
-        idToFieldsUpdated[accountId] = @{NAME: accountName, DESCRIPTION: account[DESCRIPTION]};
-        XCTAssertEqualObjects(@NO, account[kSyncTargetLocal]);
-        XCTAssertEqualObjects(@NO, account[kSyncTargetLocallyCreated]);
-        XCTAssertEqualObjects(@NO, account[kSyncTargetLocallyUpdated]);
-        XCTAssertEqualObjects(@NO, account[kSyncTargetLocallyDeleted]);
-
-        // Check that locally updated / remotely deleted record has new id (not in idToFields)
-        if ([accountName isEqualToString:locallyUpdatedRemotelyDeletedName]) {
-            XCTAssertNil(idToFields[accountId]);
-        }
-        // Otherwise should be a known id (in idToFields)
-        else {
-            XCTAssertNotNil(idToFields[accountId]);
-        }
-    }
-    
-    // Check server
-    [self checkServer:idToFieldsUpdated byNames:names];
-    
-    // Adding to idToFields so that they get deleted in tearDown
-    [idToFields addEntriesFromDictionary:idToFieldsUpdated];
-}
-
-/**
- * Sync down the test accounts, delete account on server, update same account locally, sync up with merge mode LEAVE_IF_CHANGED, check smartstore and server afterwards
- */
--(void) testSyncUpWithLocallyUpdatedRemotelyDeletedRecordsWithoutOverwrite
-{
-    // Create test data
-    [self createTestData];
-    
-    // First sync down
-    [self trySyncDown:SFSyncStateMergeModeOverwrite];
-    
-    // Make some local change
-    NSDictionary* idToFieldsLocallyUpdated = [self makeSomeLocalChanges];
-    NSArray* ids = [idToFieldsLocallyUpdated allKeys];
-    
-    // Delete record on server
-    NSString* remotelyDeletedId = [idToFieldsLocallyUpdated allKeys][0];
-    [self deleteAccountsOnServer:@[remotelyDeletedId]];
-    
-    // Sync up
-    [self trySyncUp:ids.count mergeMode:SFSyncStateMergeModeLeaveIfChanged];
-    
-    // Check that db only shows remotely deleted record as locally updated
-    NSString* idsClause = [self buildInClause:ids];
-    NSString* smartSql = [NSString stringWithFormat:@"SELECT {accounts:_soup} FROM {accounts} WHERE {accounts:Id} IN %@", idsClause];
-    SFQuerySpec* query = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:ids.count];
-    NSArray* rows = [self.store queryWithQuerySpec:query pageIndex:0 error:nil];
-    for (NSArray* row in rows) {
-        NSDictionary* account = row[0];
-        if ([account[ID] isEqualToString:remotelyDeletedId]) {
-            XCTAssertEqualObjects(@YES, account[kSyncTargetLocal]);
-            XCTAssertEqualObjects(@NO, account[kSyncTargetLocallyCreated]);
-            XCTAssertEqualObjects(@YES, account[kSyncTargetLocallyUpdated]);
-            XCTAssertEqualObjects(@NO, account[kSyncTargetLocallyDeleted]);
-        } else {
-            XCTAssertEqualObjects(@NO, account[kSyncTargetLocal]);
-            XCTAssertEqualObjects(@NO, account[kSyncTargetLocallyCreated]);
-            XCTAssertEqualObjects(@NO, account[kSyncTargetLocallyUpdated]);
-            XCTAssertEqualObjects(@NO, account[kSyncTargetLocallyDeleted]);
-        }
-    }
-    
-    // Check server
-    NSString* soql = [NSString stringWithFormat:@"SELECT Id, Name, Description FROM Account WHERE Id IN %@", idsClause];
-    SFRestRequest* request = [[SFRestAPI sharedInstance] requestForQuery:soql];
-    NSArray* records = [self sendSyncRequest:request][RECORDS];
-    NSMutableArray* idsOnServer = [NSMutableArray new];
-    for (NSDictionary* record in records) {
-        [idsOnServer addObject:record[ID]];
-        XCTAssertEqualObjects(idToFieldsLocallyUpdated[record[ID]][NAME], record[NAME]);
-        XCTAssertEqualObjects(idToFieldsLocallyUpdated[record[ID]][DESCRIPTION], record[DESCRIPTION]);
-    }
-    // Deleted id should not have been returned
-    XCTAssertFalse([idsOnServer containsObject:remotelyDeletedId]);
-
-    // There should be one less record on the server
-    XCTAssertEqual(ids.count - 1, idsOnServer.count);
-}
-
-/**
- * Sync down the test accounts, delete account on server, delete same account locally, sync up, check smartstore and server afterwards
- */
--(void) testSyncUpWithLocallyDeletedRemotelyDeletedRecords
-{
-    // Create test data
-    [self createTestData];
-    
-    // First sync down
-    [self trySyncDown:SFSyncStateMergeModeOverwrite];
-    
-    // Delete record locally
-    NSString* locallyAndRemotelyDeletedId = [idToFields allKeys][0];
-    [self deleteAccountsLocally:@[locallyAndRemotelyDeletedId]];
-
-    // Delete record on server
-    [self deleteAccountsOnServer:@[locallyAndRemotelyDeletedId]];
-    
-    // Sync up
-    [self trySyncUp:1 mergeMode:SFSyncStateMergeModeOverwrite];
-    
-    // Check that db doesn't have deleted entry
-    NSString* idsClause = [self buildInClause:@[locallyAndRemotelyDeletedId]];
-    NSString* smartSql = [NSString stringWithFormat:@"SELECT {accounts:_soup} FROM {accounts} WHERE {accounts:Id} IN %@", idsClause];
-    SFQuerySpec* query = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:1];
-    NSArray* rows = [self.store queryWithQuerySpec:query pageIndex:0 error:nil];
-    XCTAssertEqual(0, rows.count);
-    
-    // Check server
-    NSString* soql = [NSString stringWithFormat:@"SELECT Id, Name FROM Account WHERE Id IN %@", idsClause];
-    SFRestRequest* request = [[SFRestAPI sharedInstance] requestForQuery:soql];
-    NSArray* records = [self sendSyncRequest:request][RECORDS];
-    XCTAssertEqual(0, records.count);
 }
 
 /**
@@ -1066,9 +672,7 @@
     [self deleteAccountsLocally:idsLocallyDeleted];
     
     // Sync up
-    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateSameAsLocal
-                                                                                     sendRemoteModError:NO
-                                                                                        sendSyncUpError:NO];
+    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateSameAsLocal sendRemoteModError:NO sendSyncUpError:NO];
     [self trySyncUp:3 target:customTarget mergeMode:SFSyncStateMergeModeOverwrite];
     
     // Check that db doesn't doesn't contain those entries anymore
@@ -1077,42 +681,6 @@
     SFQuerySpec* query = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:idsLocallyDeleted.count];
     NSArray* rows = [self.store queryWithQuerySpec:query pageIndex:0 error:nil];
     XCTAssertEqual(0, rows.count);
-}
-
-/**
- * Sync down the test accounts, delete a few, sync up with merge mode LEAVE_IF_CHANGED, check smartstore and server afterwards
- */
--(void) testSyncUpWithLocallyDeletedRecordsWithoutOverwrite
-{
-    // Create test data
-    [self createTestData];
-    
-    // first sync down
-    [self trySyncDown:SFSyncStateMergeModeLeaveIfChanged];
-    
-    // Delete a few entries locally
-    NSArray* allIds = [idToFields allKeys];
-    NSArray* idsLocallyDeleted = @[ allIds[0], allIds[1], allIds[2] ];
-    [self deleteAccountsLocally:idsLocallyDeleted];
-
-    // Update entries on server
-    NSMutableDictionary* idToFieldsRemotelyUpdated = [NSMutableDictionary new];
-    NSArray* ids = @[ idsLocallyDeleted[0], idsLocallyDeleted[1], idsLocallyDeleted[2] ];
-    for (NSString* accountId in ids) {
-        NSString* updatedName = [NSString stringWithFormat:@"%@_updated_again", idToFields[accountId][NAME]];
-        NSString* updatedDescription = [NSString stringWithFormat:@"%@_updated_again", idToFields[accountId][DESCRIPTION]];
-        idToFieldsRemotelyUpdated[accountId] = @{NAME:updatedName, DESCRIPTION:updatedDescription};
-    }
-    [self updateAccountsOnServer:idToFieldsRemotelyUpdated];
-
-    // Sync up
-    [self trySyncUp:3 mergeMode:SFSyncStateMergeModeLeaveIfChanged];
-    
-    // Check that db still shows entries as locally deleted
-    [self checkDbStateFlags:idsLocallyDeleted soupName:ACCOUNTS_SOUP expectedLocallyCreated:NO expectedLocallyUpdated:NO expectedLocallyDeleted:YES];
-
-    // Check server
-    [self checkServer:idToFieldsRemotelyUpdated];
 }
 
 /**
@@ -1132,9 +700,7 @@
     [self deleteAccountsLocally:idsLocallyDeleted];
     
     // Sync up
-    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateGreaterThanLocal
-                                                                                     sendRemoteModError:NO
-                                                                                        sendSyncUpError:NO];
+    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateGreaterThanLocal sendRemoteModError:NO sendSyncUpError:NO];
     [self trySyncUp:3 target:customTarget mergeMode:SFSyncStateMergeModeLeaveIfChanged];
     
     // Check that db still shows entries as locally deleted
@@ -1157,9 +723,7 @@
     NSDictionary* idsToLocallyUpdated = [self makeSomeLocalChanges];
     
     // Sync up
-    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateGreaterThanLocal
-                                                                                     sendRemoteModError:YES
-                                                                                        sendSyncUpError:NO];
+    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateGreaterThanLocal sendRemoteModError:YES sendSyncUpError:NO];
     [self trySyncUp:idsToLocallyUpdated.count target:customTarget mergeMode:SFSyncStateMergeModeLeaveIfChanged];
 }
 
@@ -1178,9 +742,7 @@
     NSDictionary* idToLocallyUpdated = [self makeSomeLocalChanges];
     
     // Sync up
-    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateSameAsLocal
-                                                                                     sendRemoteModError:NO
-                                                                                        sendSyncUpError:YES];
+    SFSyncUpTarget *customTarget = [[TestSyncUpTarget alloc] initWithRemoteModDateCompare:TestSyncUpTargetRemoteModDateSameAsLocal sendRemoteModError:NO sendSyncUpError:YES];
     SFSyncOptions* options = [SFSyncOptions newSyncOptionsForSyncUp:@[NAME, DESCRIPTION] mergeMode:SFSyncStateMergeModeOverwrite];
     [self trySyncUp:idToLocallyUpdated.count actualChanges:1 target:customTarget options:options completionStatus:SFSyncStateStatusFailed];
 }
@@ -1281,11 +843,11 @@
     SFSyncState* sync = [SFSyncState newSyncDownWithOptions:[SFSyncOptions newSyncOptionsForSyncDown:SFSyncStateMergeModeLeaveIfChanged] target:[SFSoqlSyncDownTarget newSyncTarget:@"SELECT Id, Name from Account"] soupName:ACCOUNTS_SOUP name:nil store:self.store];
     NSNumber* syncId = [NSNumber numberWithInteger:sync.syncId];
     // Get by id
-    SFSyncState* fetchedSync = [SFSyncState newById:syncId store:self.store];
+    SFSyncState* fetchedSync = [SFSyncState byId:syncId store:self.store];
     [self checkStatus:fetchedSync expectedType:sync.type expectedId:sync.syncId expectedName:nil expectedTarget:sync.target expectedOptions:sync.options expectedStatus:sync.status expectedProgress:sync.progress expectedTotalSize:sync.totalSize];
     // Delete by id
     [SFSyncState deleteById:syncId store:self.store];
-    XCTAssertNil([SFSyncState newById:syncId store:self.store], "Sync should be gone");
+    XCTAssertNil([SFSyncState byId:syncId store:self.store], "Sync should be gone");
 }
 
 /**
@@ -1297,12 +859,12 @@
     SFSyncState* sync = [SFSyncState newSyncDownWithOptions:[SFSyncOptions newSyncOptionsForSyncDown:SFSyncStateMergeModeLeaveIfChanged] target:[SFSoqlSyncDownTarget newSyncTarget:@"SELECT Id, Name from Account"] soupName:ACCOUNTS_SOUP name:syncName store:self.store];
     NSNumber* syncId = [NSNumber numberWithInteger:sync.syncId];
     // Get by name
-    SFSyncState* fetchedSync = [SFSyncState newByName:syncName store:self.store];
+    SFSyncState* fetchedSync = [SFSyncState byName:syncName store:self.store];
     [self checkStatus:fetchedSync expectedType:sync.type expectedId:sync.syncId expectedName:syncName expectedTarget:sync.target expectedOptions:sync.options expectedStatus:sync.status expectedProgress:sync.progress expectedTotalSize:sync.totalSize];
     // Delete by name
     [SFSyncState deleteByName:syncName store:self.store];
-    XCTAssertNil([SFSyncState newById:syncId store:self.store], "Sync should be gone");
-    XCTAssertNil([SFSyncState newByName:syncName store:self.store], "Sync should be gone");
+    XCTAssertNil([SFSyncState byId:syncId store:self.store], "Sync should be gone");
+    XCTAssertNil([SFSyncState byName:syncName store:self.store], "Sync should be gone");
 }
 
 /**
@@ -1313,11 +875,11 @@
     SFSyncState* sync = [SFSyncState newSyncUpWithOptions:[SFSyncOptions newSyncOptionsForSyncDown:SFSyncStateMergeModeLeaveIfChanged] target:[SFSyncUpTarget new] soupName:ACCOUNTS_SOUP name:nil store:self.store];
     NSNumber* syncId = [NSNumber numberWithInteger:sync.syncId];
     // Get by id
-    SFSyncState* fetchedSync = [SFSyncState newById:syncId store:self.store];
+    SFSyncState* fetchedSync = [SFSyncState byId:syncId store:self.store];
     [self checkStatus:fetchedSync expectedType:sync.type expectedId:sync.syncId expectedName:nil expectedTarget:sync.target expectedOptions:sync.options expectedStatus:sync.status expectedProgress:sync.progress expectedTotalSize:sync.totalSize];
     // Delete by id
     [SFSyncState deleteById:syncId store:self.store];
-    XCTAssertNil([SFSyncState newById:syncId store:self.store], "Sync should be gone");
+    XCTAssertNil([SFSyncState byId:syncId store:self.store], "Sync should be gone");
 }
 
 /**
@@ -1329,12 +891,12 @@
     SFSyncState* sync = [SFSyncState newSyncUpWithOptions:[SFSyncOptions newSyncOptionsForSyncDown:SFSyncStateMergeModeLeaveIfChanged] target:[SFSyncUpTarget new] soupName:ACCOUNTS_SOUP name:syncName store:self.store];
     NSNumber* syncId = [NSNumber numberWithInteger:sync.syncId];
     // Get by name
-    SFSyncState* fetchedSync = [SFSyncState newByName:syncName store:self.store];
+    SFSyncState* fetchedSync = [SFSyncState byName:syncName store:self.store];
     [self checkStatus:fetchedSync expectedType:sync.type expectedId:sync.syncId expectedName:syncName expectedTarget:sync.target expectedOptions:sync.options expectedStatus:sync.status expectedProgress:sync.progress expectedTotalSize:sync.totalSize];
     // Delete by name
     [SFSyncState deleteByName:syncName store:self.store];
-    XCTAssertNil([SFSyncState newById:syncId store:self.store], "Sync should be gone");
-    XCTAssertNil([SFSyncState newByName:syncName store:self.store], "Sync should be gone");
+    XCTAssertNil([SFSyncState byId:syncId store:self.store], "Sync should be gone");
+    XCTAssertNil([SFSyncState byName:syncName store:self.store], "Sync should be gone");
 }
 
 /**
@@ -1350,7 +912,7 @@
 
     // Delete by name
     [SFSyncState deleteByName:syncName store:self.store];
-    XCTAssertNil([SFSyncState newByName:syncName store:self.store], "Sync should be gone");
+    XCTAssertNil([SFSyncState byName:syncName store:self.store], "Sync should be gone");
 }
 
 /**
@@ -1366,7 +928,7 @@
 
     // Delete by name
     [SFSyncState deleteByName:syncName store:self.store];
-    XCTAssertNil([SFSyncState newByName:syncName store:self.store], "Sync should be gone");
+    XCTAssertNil([SFSyncState byName:syncName store:self.store], "Sync should be gone");
 }
 
 #pragma clang diagnostic pop
@@ -1384,54 +946,8 @@
     return [self trySyncDown:mergeMode target:target soupName:ACCOUNTS_SOUP totalSize:idToFields.count numberFetches:1];
 }
 
-- (void)checkDbExists:(NSString*)soupName ids:(NSArray*)ids idField:(NSString*)idField {
-    NSString* smartSql = [NSString stringWithFormat:@"SELECT {%@:_soup} FROM {%@} WHERE {%@:%@} IN %@",
-            soupName, soupName, soupName, idField, [self buildInClause:ids]];
-
-    SFQuerySpec* query = [SFQuerySpec newSmartQuerySpec:smartSql withPageSize:ids.count];
-    NSArray* rowsFromDb = [self.store queryWithQuerySpec:query pageIndex:0 error:nil];
-    XCTAssertEqual(ids.count, rowsFromDb.count, "All records should have been returned from smartstore");
-}
-
 - (void)checkDb:(NSDictionary*)dict {
     [self checkDb:dict soupName:ACCOUNTS_SOUP];
-}
-
-- (void) checkServer:(NSDictionary*)idToFieldsToCheck {
-    return [self checkServer:idToFieldsToCheck objectType:ACCOUNT_TYPE];
-}
-
-- (void) checkServer:(NSDictionary*)idToFieldsToCheck byNames:(NSArray*)names {
-    // Ids clause.
-    NSString* namesClause = [self buildInClause:names];
-    
-    // Query
-    NSString* soql = [NSString stringWithFormat:@"SELECT Id, Name, Description FROM Account WHERE Name IN %@", namesClause];
-    SFRestRequest* request = [[SFRestAPI sharedInstance] requestForQuery:soql];
-    NSArray* records = [self sendSyncRequest:request][RECORDS];
-    XCTAssertEqual(names.count, records.count);
-    for (NSDictionary* record in records) {
-        NSString* accountId = record[ID];
-        for (NSString* fieldName in [idToFieldsToCheck[accountId] allKeys]) {
-            XCTAssertEqualObjects(idToFieldsToCheck[accountId][fieldName], record[fieldName]);
-        }
-    }
-}
-
-
-- (void)trySyncUp:(NSInteger)numberChanges mergeMode:(SFSyncStateMergeMode)mergeMode {
-    SFSyncOptions* defaultOptions = [SFSyncOptions newSyncOptionsForSyncUp:@[NAME, DESCRIPTION] mergeMode:mergeMode];
-    [self trySyncUp:numberChanges options:defaultOptions];
-}
-
-- (void)trySyncUp:(NSInteger)numberChanges
-          options:(SFSyncOptions *) options {
-    SFSyncUpTarget *defaultTarget = [[SFSyncUpTarget alloc] init];
-    [self trySyncUp:numberChanges
-      actualChanges:numberChanges
-             target:defaultTarget
-            options:options
-   completionStatus:SFSyncStateStatusDone];
 }
 
 - (void)createTestData {
@@ -1446,30 +962,12 @@
     idToFields = nil;
 }
 
-
-- (void) deleteSyncs {
-    [self.store clearSoup:kSFSyncStateSyncsSoupName];
-}
-
 - (NSDictionary*) makeSomeLocalChanges {
     return [self makeSomeLocalChanges:idToFields soupName:ACCOUNTS_SOUP];
 }
 
 - (NSDictionary*) makeSomeRemoteChanges {
     return [self makeSomeRemoteChanges:idToFields objectType:ACCOUNT_TYPE];
-}
-
-
--(void) deleteAccountsLocally:(NSArray*)ids {
-    [self deleteRecordsLocally:ids soupName:ACCOUNTS_SOUP];
-}
-
--(void)updateAccountsOnServer:(NSDictionary*)idToFieldsUpdated {
-    [self updateRecordsOnServer:idToFieldsUpdated objectType:ACCOUNT_TYPE];
-}
-
-- (void)deleteAccountsOnServer:(NSArray *)ids {
-    [self deleteRecordsOnServer:ids objectType:ACCOUNT_TYPE];
 }
 
 @end

@@ -30,39 +30,35 @@
 
 #import "SFSDKAuthPreferences.h"
 #import "SFManagedPreferences.h"
-#import <SalesforceAnalytics/NSUserDefaults+SFAdditions.h>
+#import <SalesforceSDKCommon/NSUserDefaults+SFAdditions.h>
 
-NSString * const kSFLoginHostChangedNotification = @"kSFLoginHostChanged";
-NSString * const kSFLoginHostChangedNotificationOriginalHostKey = @"originalLoginHost";
-NSString * const kSFLoginHostChangedNotificationUpdatedHostKey = @"updatedLoginHost";
+static NSString * const  kSFLoginHostChangedNotification = @"kSFLoginHostChanged";
+static NSString * const  kSFLoginHostChangedNotificationOriginalHostKey = @"originalLoginHost";
+static NSString * const  kSFLoginHostChangedNotificationUpdatedHostKey = @"updatedLoginHost";
 
 static NSString * const kDeprecatedLoginHostPrefKey = @"login_host_pref";
 
-NSString * const kSFUserAccountOAuthLoginHostDefault = @"login.salesforce.com"; // last resort
-NSString * const kSFUserAccountOAuthLoginHost = @"SFDCOAuthLoginHost";
+static NSString * const  kSFUserAccountOAuthLoginHostDefault = @"login.salesforce.com"; // last resort
+static NSString * const  kSFUserAccountOAuthLoginHost = @"SFDCOAuthLoginHost";
 
 // The key for storing the persisted OAuth scopes.
-NSString * const kOAuthScopesKey = @"oauth_scopes";
+static NSString * const  kOAuthScopesKey = @"oauth_scopes";
 
 // The key for storing the persisted OAuth client ID.
-NSString * const kOAuthClientIdKey = @"oauth_client_id";
+static NSString * const  kOAuthClientIdKey = @"oauth_client_id";
 
 // The key for storing the persisted OAuth redirect URI.
-NSString * const kOAuthRedirectUriKey = @"oauth_redirect_uri";
+static NSString * const  kOAuthRedirectUriKey = @"oauth_redirect_uri";
 
 // The key for storing the persisted IDP app identifier
 NSString * const kSFIDPKey = @"SFDCIdp";
 
-// The key for storing the IDP App Enabled flag
-NSString * const kSFIDPEnabledKey = @"SFDCIdpEnabled";
-
-// The key for storing the IDP App Enabled flag
+// The key for storing the IDP Provider Enabled flag
 NSString * const kSFIDPProviderKey = @"SFIDPProvider";
 
 // The key for storing the persisted OAuth scopes.
 NSString * const kOAuthAppName = @"oauth_app_name";
 
-NSString * const kSFLegacyAuthIndicatorKey = @"SFDCUseLegacyAuth";
 
 @implementation SFSDKAuthPreferences
 
@@ -171,13 +167,13 @@ NSString * const kSFLegacyAuthIndicatorKey = @"SFDCUseLegacyAuth";
     [defs synchronize];
 }
 
-- (NSString *)idpAppScheme
+- (NSString *)idpAppURIScheme
 {
     NSUserDefaults *defs = [NSUserDefaults msdkUserDefaults];
     return [defs stringForKey:kSFIDPKey];
 }
 
-- (void)setIdpAppScheme:(NSString *)appIdentifier
+- (void)setIdpAppURIScheme:(NSString *)appIdentifier
 {
     NSUserDefaults *defs = [NSUserDefaults msdkUserDefaults];
     [defs setObject:appIdentifier forKey:kSFIDPKey];
@@ -186,15 +182,7 @@ NSString * const kSFLegacyAuthIndicatorKey = @"SFDCUseLegacyAuth";
 
 - (BOOL)idpEnabled
 {
-    NSUserDefaults *defs = [NSUserDefaults msdkUserDefaults];
-    return [defs boolForKey:kSFIDPEnabledKey];
-}
-
-- (void)setIdpEnabled:(BOOL)idpEnabled
-{
-    NSUserDefaults *defs = [NSUserDefaults msdkUserDefaults];
-    [defs setBool:idpEnabled forKey:kSFIDPEnabledKey];
-    [defs synchronize];
+    return self.idpAppURIScheme && self.idpAppURIScheme.length > 0;
 }
 
 - (BOOL)isIdentityProvider
@@ -222,18 +210,4 @@ NSString * const kSFLegacyAuthIndicatorKey = @"SFDCUseLegacyAuth";
     [defs setObject:appDisplayName forKey:kOAuthAppName];
     [defs synchronize];
 }
-
-- (BOOL)useLegacyAuthenticationManager{
-    NSUserDefaults *defs = [NSUserDefaults msdkUserDefaults];
-    return [defs stringForKey:kSFLegacyAuthIndicatorKey];
-
-}
-
-- (void)setUseLegacyAuthenticationManager:(BOOL)enabled {
-    NSUserDefaults *defs = [NSUserDefaults msdkUserDefaults];
-    [defs setBool:enabled forKey:kSFLegacyAuthIndicatorKey];
-    [defs synchronize];
-}
-
-
 @end

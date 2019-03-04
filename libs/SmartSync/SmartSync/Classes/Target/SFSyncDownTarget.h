@@ -29,8 +29,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @class SFSmartSyncSyncManager;
 
-typedef void (^SFSyncDownTargetFetchCompleteBlock) (NSArray* _Nullable records);
-typedef void (^SFSyncDownTargetFetchErrorBlock) (NSError * _Nullable e);
+typedef void (^SFSyncDownTargetFetchCompleteBlock) (NSArray* _Nullable records) NS_SWIFT_NAME(SyncDownCompletionBlock);
+typedef void (^SFSyncDownTargetFetchErrorBlock) (NSError * _Nullable e) NS_SWIFT_NAME(SyncDownErrorBlock);
 
 typedef NS_ENUM(NSInteger, SFSyncDownTargetQueryType) {
   SFSyncDownTargetQueryTypeMru,
@@ -38,12 +38,15 @@ typedef NS_ENUM(NSInteger, SFSyncDownTargetQueryType) {
   SFSyncDownTargetQueryTypeSoql,
   SFSyncDownTargetQueryTypeRefresh,
   SFSyncDownTargetQueryTypeParentChildren,
-  SFSyncDownTargetQueryTypeCustom
-};
+  SFSyncDownTargetQueryTypeCustom,
+  SFSyncDownTargetQueryTypeMetadata,
+  SFSyncDownTargetQueryTypeLayout
+} NS_SWIFT_NAME(SyncDownTarget.QueryType);
 
+NS_SWIFT_NAME(SyncDownTarget)
 @interface SFSyncDownTarget : SFSyncTarget
 
-@property (nonatomic) SFSyncDownTargetQueryType queryType;
+@property (nonatomic,assign) SFSyncDownTargetQueryType queryType;
 
 // Set during a fetch
 @property (nonatomic) NSUInteger totalSize;
@@ -59,14 +62,14 @@ typedef NS_ENUM(NSInteger, SFSyncDownTargetQueryType) {
 - (void) startFetch:(SFSmartSyncSyncManager*)syncManager
        maxTimeStamp:(long long)maxTimeStamp
          errorBlock:(SFSyncDownTargetFetchErrorBlock)errorBlock
-      completeBlock:(SFSyncDownTargetFetchCompleteBlock)completeBlock;
+      completeBlock:(SFSyncDownTargetFetchCompleteBlock)completeBlock NS_SWIFT_NAME(startFetch(syncManager:maxTimeStamp:onFail:onComplete:));
 
 /**
  * Continue fetching records conforming to target if any
  */
 - (void) continueFetch:(SFSmartSyncSyncManager*)syncManager
             errorBlock:(SFSyncDownTargetFetchErrorBlock)errorBlock
-         completeBlock:(nullable SFSyncDownTargetFetchCompleteBlock)completeBlock;
+         completeBlock:(nullable SFSyncDownTargetFetchCompleteBlock)completeBlock NS_SWIFT_NAME(continueFetch(syncManager:onFail:onComplete:));
 
 /**
  * Gets the latest modification timestamp from the array of records. Note: inheriting classes can
@@ -81,11 +84,18 @@ typedef NS_ENUM(NSInteger, SFSyncDownTargetQueryType) {
 
 /**
  * Delete from local store records that a full sync down would no longer download
- */
+  *
+  * @param syncManager The sync manager
+  * @param soupName The soup to clean
+  * @param syncId The sync id
+  * @param errorBlock Block to execute in case of error
+  * @param completeBlock Block to execute upon completion
+  */
 - (void)cleanGhosts:(SFSmartSyncSyncManager *)syncManager
-                 soupName:(NSString *)soupName
-               errorBlock:(SFSyncDownTargetFetchErrorBlock)errorBlock
-            completeBlock:(SFSyncDownTargetFetchCompleteBlock)completeBlock;
+           soupName:(NSString *)soupName
+             syncId:(NSNumber *)syncId
+         errorBlock:(SFSyncDownTargetFetchErrorBlock)errorBlock
+      completeBlock:(SFSyncDownTargetFetchCompleteBlock)completeBlock NS_SWIFT_NAME(cleanGhosts(syncManager:soupName:syncId:onFail:onComplete:));
 
 /**
  * Get ids of records that should not be written over

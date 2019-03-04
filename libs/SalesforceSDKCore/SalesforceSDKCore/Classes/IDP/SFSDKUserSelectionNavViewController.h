@@ -29,11 +29,12 @@
 #import <UIKit/UIKit.h>
 #import "SFSDKUserSelectionView.h"
 
-@class SFSDKIDPAuthClient;
+
 @class SFUserAccount;
+@class SFSDKUserSelectionTableViewController;
 
 @interface SFSDKUserSelectionNavViewController : UINavigationController<SFSDKUserSelectionView>
 @property (nonatomic,weak) id<SFSDKUserSelectionViewDelegate> userSelectionDelegate;
 @property (nonatomic,strong) NSDictionary *spAppOptions;
-
+- (SFSDKUserSelectionTableViewController *)createUserSelectionController;
 @end

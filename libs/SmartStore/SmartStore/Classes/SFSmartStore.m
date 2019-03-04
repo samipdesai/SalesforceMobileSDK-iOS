@@ -28,7 +28,7 @@
 #import "FMDatabase.h"
 #import "FMDatabaseAdditions.h"
 #import "FMDatabaseQueue.h"
-#import <SalesforceSDKCore/SFJsonUtils.h>
+#import <SalesforceSDKCommon/SFJsonUtils.h>
 #import "SFSmartStore+Internal.h"
 #import "SFSmartStoreUpgrade.h"
 #import "SFSmartStoreUtils.h"
@@ -74,11 +74,13 @@ static NSString * const kSFSmartStoreExternalIdNilDescription   = @"For upsert w
 static NSString * const kSFSmartStoreExtIdLookupError           = @"There was an error retrieving the soup entry ID for path '%@' and value '%@': %@";
 static NSInteger  const kSFSmartStoreOtherErrorCode             = 999;
 
+NSString *const kSFSmartStoreErrorLoadExternalSoup =  @"com.salesforce.smartstore.LoadExternalSoupError";
+
 // Encryption constants
 NSString * const kSFSmartStoreEncryptionKeyLabel = @"com.salesforce.smartstore.encryption.keyLabel";
 
 // Table to keep track of soup attributes
-static NSString *const SOUP_ATTRS_TABLE = @"soup_attrs";
+NSString *const SOUP_ATTRS_TABLE = @"soup_attrs";
 static NSString *const SOUP_NAMES_TABLE = @"soup_names"; //legacy soup attrs, still around for backward compatibility. Do not use it.
 
 // Table to keep track of soup's index specs
@@ -320,6 +322,10 @@ NSString *const EXPLAIN_ROWS = @"rows";
         }
         SFSmartStore *store = _allSharedStores[userKey][storeName];
         if (nil == store) {
+            if (user.loginState != SFUserAccountLoginStateLoggedIn) {
+                [SFSDKSmartStoreLogger w:[self class] format:@"%@ A user account must be in the  SFUserAccountLoginStateLoggedIn state in order to create a store.", NSStringFromSelector(_cmd), storeName, NSStringFromClass(self)];
+                return nil;
+            }
             store = [[self alloc] initWithName:storeName user:user];
             if (store)
                 _allSharedStores[userKey][storeName] = store;
@@ -629,8 +635,9 @@ NSString *const EXPLAIN_ROWS = @"rows";
     @throw [NSException exceptionWithName:message reason:[db lastErrorMessage] userInfo:nil];
 }
 
-- (void)inDatabase:(void (^)(FMDatabase *db))block error:(NSError* __autoreleasing *)error
+- (BOOL)inDatabase:(void (^)(FMDatabase *db))block error:(NSError* __autoreleasing *)error
 {
+    __block BOOL success = YES;
     [self.storeQueue inDatabase:^(FMDatabase* db) {
         @try {
             block(db);
@@ -639,11 +646,14 @@ NSString *const EXPLAIN_ROWS = @"rows";
             if (error != nil) {
                 *error = [self errorForException:exception];
             }
+            success = NO;
         }
     }];
+    return success;
 }
 
-- (void)inTransaction:(void (^)(FMDatabase *db, BOOL *rollback))block error:(NSError* __autoreleasing *)error {
+- (BOOL)inTransaction:(void (^)(FMDatabase *db, BOOL *rollback))block error:(NSError* __autoreleasing *)error {
+    __block BOOL success = YES;
     [self.storeQueue inTransaction:^(FMDatabase* db, BOOL *rollback) {
         @try {
             block(db, rollback);
@@ -655,9 +665,10 @@ NSString *const EXPLAIN_ROWS = @"rows";
             if (error != nil) {
                 *error = [self errorForException:exception];
             }
+            success = NO;
         }
     }];
-    
+    return success;
 }
 
 - (NSError*) errorForException:(NSException*)exception
@@ -765,7 +776,8 @@ NSString *const EXPLAIN_ROWS = @"rows";
     SFSmartStoreEncryptionKeyBlock keyBlock = [SFSmartStore encryptionKeyBlock];
     if (keyBlock) {
         SFEncryptStream *encryptStream = [[SFEncryptStream alloc] initToFileAtPath:filePath append:NO];
-        [encryptStream setupWithKey:keyBlock().key andInitializationVector:nil];
+        SFEncryptionKey *encKey = keyBlock();
+        [encryptStream setupWithKey:encKey.key andInitializationVector:encKey.initializationVector];
         outputStream = encryptStream;
     } else {
         outputStream = [[NSOutputStream alloc] initToFileAtPath:filePath append:NO];
@@ -791,35 +803,107 @@ NSString *const EXPLAIN_ROWS = @"rows";
 }
 
 - (id)loadExternalSoupEntry:(NSNumber *)soupEntryId
-              soupTableName:(NSString *)soupTableName {
+              soupTableName:(NSString *)soupTableName
+{
+    return [SFJsonUtils objectFromJSONString:[self loadExternalSoupEntryAsString:soupEntryId soupTableName:soupTableName]];
+}
+
+- (NSString*)loadExternalSoupEntryAsString:(NSNumber *)soupEntryId
+                             soupTableName:(NSString *)soupTableName
+{
     NSString *filePath = [self externalStorageSoupFilePath:soupEntryId
                                              soupTableName:soupTableName];
-    NSInputStream *inputStream = nil;
+    
     SFSmartStoreEncryptionKeyBlock keyBlock = [SFSmartStore encryptionKeyBlock];
+    NSData* key;
+    NSData* initializationVector;
     if (keyBlock) {
+        SFEncryptionKey *encKey = keyBlock();
+        key = encKey.key;
+        initializationVector = encKey.initializationVector;
+    }
+    
+    NSString* entryAsString = [self readFromEncryptedFile:filePath key:key iv:initializationVector];
+    
+    // Before 6.2, we were using nill IV when encrypting.
+    // Starting in 6.2, we are using a non-nil IV when encrypting.
+    // If it doesn't look like proper json, it means the entry was encrypted with pre 6.2 SDK.
+    // It needs to be stored back with a non-nil IV encryption.
+    if (![entryAsString hasPrefix:@"{"]) {
+        NSDictionary* entry = [SFJsonUtils objectFromJSONString:entryAsString];
+        
+        if(!entry) {
+            if (initializationVector) {
+                entryAsString = [self readFromEncryptedFile:filePath key:key iv:nil];
+                if ([entryAsString length] > 0) {
+                    [self writeToEncryptedFile:filePath content:entryAsString key:key iv:initializationVector];
+                } else {
+                    [SFSDKSmartStoreLogger e:[self class] format:@"Attempt to migrate an encrypted externally saved soup '%@' with a null IV  failed.", soupTableName];
+                }
+            } else {
+                NSError* error = [SFJsonUtils lastError];
+                NSString *errorMessage = [NSString stringWithFormat:@"Loading external soup from file failed! encrypted: %@, soupEntryId: %@, soupTableName: %@, filePath: '%@', error: %@.",
+                                          key ? @"YES" : @"NO",
+                                          soupEntryId,
+                                          soupTableName,
+                                          filePath,
+                                          error];
+                [SFSDKSmartStoreLogger e:[self class] format:errorMessage];
+                @throw [NSException exceptionWithName:kSFSmartStoreErrorLoadExternalSoup
+                                               reason:errorMessage
+                                             userInfo:nil];
+                
+            }
+        }
+    }
+
+    return entryAsString;
+}
+
+- (NSString*) readFromEncryptedFile:(NSString*)filePath
+                                key:(NSData*)key
+                                 iv:(NSData*)iv
+{
+    NSMutableString* content = [NSMutableString new];
+    NSInputStream *inputStream = nil;
+    if (key) {
         SFDecryptStream *decryptStream = [[SFDecryptStream alloc] initWithFileAtPath:filePath];
-        [decryptStream setupWithKey:keyBlock().key andInitializationVector:nil];
+        [decryptStream setupWithKey:key andInitializationVector:iv];
         inputStream = decryptStream;
     } else {
         inputStream = [[NSInputStream alloc] initWithFileAtPath:filePath];
     }
+    
+    uint8_t buffer[4096];
+    NSInteger len;
     [inputStream open];
-    NSError *error = nil;
-    id result = [NSJSONSerialization JSONObjectWithStream:inputStream
-                                                  options:NSJSONReadingAllowFragments
-                                                    error:&error];
-    [inputStream close];
-    if (!result && error) {
-        NSString *errorMessage = [NSString stringWithFormat:@"Loading external soup from file failed! encrypted: %@, soupEntryId: %@, soupTableName: %@, filePath: '%@', error: %@.",
-                                  keyBlock ? @"YES" : @"NO",
-                                  soupEntryId,
-                                  soupTableName,
-                                  filePath,
-                                  error];
-        NSAssert(NO, errorMessage);
-        [SFSDKSmartStoreLogger e:[self class] format:errorMessage];
+    while ((len = [inputStream read:buffer maxLength:sizeof(buffer)]) > 0) {
+        NSString* bufferAsString = [[NSString alloc] initWithBytes:buffer length:len encoding:NSUTF8StringEncoding];
+        if (bufferAsString) {
+            [content appendString:bufferAsString];
+        }
     }
-    return result;
+    [inputStream close];
+    return content;
+}
+
+- (void) writeToEncryptedFile:(NSString*)filePath
+                       content:(NSString *)content
+                          key:(NSData*)key
+                           iv:(NSData*)iv
+{
+    NSOutputStream *outputStream = nil;
+    if (key) {
+        SFEncryptStream *encryptStream = [[SFEncryptStream alloc] initToFileAtPath:filePath append:NO];
+        [encryptStream setupWithKey:key andInitializationVector:iv];
+        outputStream = encryptStream;
+    } else {
+        outputStream = [[NSOutputStream alloc] initToFileAtPath:filePath append:NO];
+    }
+    [outputStream open];
+    NSData *data = [content dataUsingEncoding:NSUTF8StringEncoding];
+    [outputStream write:data.bytes maxLength:data.length];
+    [outputStream close];
 }
 
 - (void)deleteExternalSoupEntry:(NSNumber *)soupEntryId
@@ -1492,13 +1576,13 @@ NSString *const EXPLAIN_ROWS = @"rows";
     return returnId;
 }
 
-- (NSUInteger)countWithQuerySpec:(SFQuerySpec*)querySpec error:(NSError **)error;
+- (NSNumber*)countWithQuerySpec:(SFQuerySpec*)querySpec error:(NSError **)error;
 {
     __block NSInteger result;
     [self inDatabase:^(FMDatabase* db) {
         result = [self countWithQuerySpec:querySpec withDb:db];
     } error:error];
-    return result;
+    return [NSNumber numberWithUnsignedInteger:result];
 }
 
 - (NSUInteger)countWithQuerySpec:(SFQuerySpec*)querySpec withDb:(FMDatabase*)db
@@ -1525,17 +1609,23 @@ NSString *const EXPLAIN_ROWS = @"rows";
 
 - (NSArray *)queryWithQuerySpec:(SFQuerySpec *)querySpec pageIndex:(NSUInteger)pageIndex error:(NSError **)error;
 {
-    __block NSArray* result;
-    [self inDatabase:^(FMDatabase* db) {
-        result = [self queryWithQuerySpec:querySpec pageIndex:pageIndex withDb:db];
-    } error:error];
-    return result;
+    NSMutableString* resultString = [NSMutableString new];
+    if ([self queryAsString:resultString querySpec:querySpec pageIndex:pageIndex error:error]) {
+        return [SFJsonUtils objectFromJSONString:resultString];
+    } else {
+        return nil;
+    }
 }
 
-- (NSArray *)queryWithQuerySpec:(SFQuerySpec *)querySpec pageIndex:(NSUInteger)pageIndex withDb:(FMDatabase*)db
+- (BOOL) queryAsString:(NSMutableString*)resultString querySpec:(SFQuerySpec *)querySpec pageIndex:(NSUInteger)pageIndex error:(NSError **)error NS_SWIFT_NAME(query(result:querySpec:pageIndex:))
 {
-    NSMutableArray* result = [NSMutableArray new]; // to get all records in one shot, caller might specify a large pageSize - we don't want to blindly allocate an array of size pageSize
-    
+    return [self inDatabase:^(FMDatabase* db) {
+        [self queryAsString:resultString querySpec:querySpec pageIndex:pageIndex withDb:db];
+    } error:error];
+}
+
+- (void)queryAsString:(NSMutableString*)resultString querySpec:(SFQuerySpec *)querySpec pageIndex:(NSUInteger)pageIndex withDb:(FMDatabase*)db
+{
     // Page
     NSUInteger offsetRows = querySpec.pageSize * pageIndex;
     NSUInteger numberRows = querySpec.pageSize;
@@ -1550,69 +1640,106 @@ NSString *const EXPLAIN_ROWS = @"rows";
     
     // Executing query
     FMResultSet *frs = [self executeQueryThrows:limitSql withArgumentsInArray:args withDb:db];
+    [resultString appendString:@"["];
+    NSUInteger currentRow = 0;
     while ([frs next]) {
+        if (currentRow > 0) {
+            [resultString appendString:@","];
+        }
+        currentRow++;
+        
         // Smart queries
         if (querySpec.queryType == kSFSoupQueryTypeSmart || querySpec.selectPaths != nil) {
-            NSArray *data = [self getDataFromRow:frs];
-            if (data) {
-                [result addObject:data];
-            }
+            [self getDataFromRowAsString:resultString resultSet:frs];
         }
         // Exact/like/range queries
         else {
             for (int i = 0; i < frs.columnCount; i++) {
                 NSString *columnName = [frs columnNameForIndex:i];
-                id entry = nil;
                 if ([columnName isEqualToString:SOUP_COL]) {
-                    NSString *rawJson = [frs stringForColumnIndex:i];
-                    entry = [SFJsonUtils objectFromJSONString:rawJson];
-                    if (entry) {
-                        [result addObject:entry];
-                    }
+                    [resultString appendString:[frs stringForColumnIndex:i]];
                 }
                 else if ([columnName isEqualToString:kSoupFeatureExternalStorage]) {
                     NSString *tableName = [frs stringForColumnIndex:i];
                     NSNumber *soupEntryId = @([frs longForColumnIndex:++i]);
-                    id entry = [self loadExternalSoupEntry:soupEntryId soupTableName:tableName];
-                    if (entry) {
-                        [result addObject:entry];
-                    }
+                    [resultString appendString:[self loadExternalSoupEntryAsString:soupEntryId soupTableName:tableName]];
                 }
             }
         }
     }
     [frs close];
-    
-    return result;
+    [resultString appendString:@"]"];
 }
 
-- (NSArray *) getDataFromRow:(FMResultSet*) frs
+- (void) getDataFromRowAsString:(NSMutableString*)resultString resultSet:(FMResultSet*)frs
 {
-    NSMutableArray* result = [NSMutableArray arrayWithCapacity:frs.columnCount];
     NSDictionary* valuesMap = [frs resultDictionary];
+    [resultString appendString:@"["];
     for (int i = 0; i < frs.columnCount; i++) {
+        if (i > 0) {
+            [resultString appendString:@","];
+        }
         NSString* columnName = [frs columnNameForIndex:i];
         id value = valuesMap[columnName];
-        if ([columnName hasSuffix:SOUP_COL] && [value isKindOfClass:[NSString class]]) {
-            id entry = [SFJsonUtils objectFromJSONString:value];
-            if (entry) {
-                [result addObject:entry];
-            }
+        if ([value isKindOfClass:[NSNull class]]) {
+            [resultString appendString:@"null"];
+        }
+        else if ([value isKindOfClass:[NSString class]] &&
+            ([columnName isEqualToString:SOUP_COL] || [columnName hasPrefix:[NSString stringWithFormat:@"%@:", SOUP_COL]])) {
+            [resultString appendString:value];
         }
         else if ([columnName isEqualToString:kSoupFeatureExternalStorage]) {
             NSNumber *soupEntryId = @([frs longForColumnIndex:++i]);
-            id entry = [self loadExternalSoupEntry:soupEntryId soupTableName:value];
-            if (entry) {
-                [result addObject:entry];
-            }
+            [resultString appendString:[self loadExternalSoupEntryAsString:soupEntryId soupTableName:value]];
         }
-        else {
-            if (value) {
-                [result addObject:value];
-            }
+        else if ([value isKindOfClass:[NSNumber class]]) {
+            [resultString appendString:[((NSNumber*)value) stringValue]];
+        }
+        else if ([value isKindOfClass:[NSString class]]) {
+            [resultString appendString:@"\""];
+            [resultString appendString:[self escapeStringValue:((NSString*) value)]];
+            [resultString appendString:@"\""];
+        }
+    
+    }
+    [resultString appendString:@"]"];
+}
+
+-(NSString*) escapeStringValue:(NSString*) raw {
+    NSMutableString* escaped = [NSMutableString new];
+    
+    for (NSUInteger i = 0; i < raw.length; i += 1) {
+        unichar c = [raw characterAtIndex:i];
+        switch (c) {
+            case '\\':
+            case '/':
+            case '"':
+                [escaped appendFormat:@"\\%C", c];
+                break;
+            case '\b':
+                [escaped appendString:@"\\b"];
+                break;
+            case '\f':
+                [escaped appendString:@"\\f"];
+                break;
+            case '\n':
+                [escaped appendString:@"\\n"];
+                break;
+            case '\r':
+                [escaped appendString:@"\\r"];
+                break;
+            case '\t':
+                [escaped appendString:@"\\t"];
+                break;
+            default:
+                if (c < ' ') {
+                    [escaped appendFormat:@"\\u%04x", c];
+                } else {
+                    [escaped appendFormat:@"%C", c];
+                }
         }
     }
-    return result;
+    return [NSString stringWithString:escaped];
 }
 
 - (NSString *)idsInPredicate:(NSArray *)ids idCol:(NSString*)idCol
@@ -1927,9 +2054,9 @@ NSString *const EXPLAIN_ROWS = @"rows";
     [self removeEntries:soupEntryIds fromSoup:soupName error:nil];
 }
 
-- (void)removeEntries:(NSArray*)soupEntryIds fromSoup:(NSString*)soupName error:(NSError**)error
+- (BOOL)removeEntries:(NSArray*)soupEntryIds fromSoup:(NSString*)soupName error:(NSError**)error
 {
-    [self inTransaction:^(FMDatabase* db, BOOL* rollback) {
+    return [self inTransaction:^(FMDatabase* db, BOOL* rollback) {
         [self removeEntries:soupEntryIds fromSoup:soupName withDb:db];
     } error:error];
 }
@@ -1963,11 +2090,11 @@ NSString *const EXPLAIN_ROWS = @"rows";
     [self removeEntriesByQuery:querySpec fromSoup:soupName error:nil];
 }
 
-- (void)removeEntriesByQuery:(SFQuerySpec*)querySpec fromSoup:(NSString*)soupName error:(NSError**)error
+- (BOOL)removeEntriesByQuery:(SFQuerySpec*)querySpec fromSoup:(NSString*)soupName error:(NSError**)error
 {
-    [self inTransaction:^(FMDatabase* db, BOOL* rollback) {
+    return [self inTransaction:^(FMDatabase* db, BOOL* rollback) {
         [self removeEntriesByQuery:querySpec fromSoup:soupName withDb:db];
-    } error:nil];
+    } error:error];
 }
 
 - (void)removeEntriesByQuery:(SFQuerySpec*)querySpec fromSoup:(NSString*)soupName withDb:(FMDatabase*) db

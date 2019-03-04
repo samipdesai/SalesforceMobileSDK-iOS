@@ -24,8 +24,7 @@
 
 #import "SFOAuthSessionRefresher+Internal.h"
 #import "SFUserAccountManager.h"
-
-static NSString * const kSFAuthenticationManagerFinishedNotification = @"kSFAuthenticationManagerFinishedNotification";
+#import "SFOAuthInfo.h"
 
 @implementation SFOAuthSessionRefresher
 
@@ -108,18 +107,13 @@ static NSString * const kSFAuthenticationManagerFinishedNotification = @"kSFAuth
 
 - (void)oauthCoordinatorDidAuthenticate:(SFOAuthCoordinator *)coordinator authInfo:(SFOAuthInfo *)info {
     [self completeWithSuccess:coordinator.credentials];
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if ([SFUserAccountManager sharedInstance].useLegacyAuthenticationManager) {
-            [[NSNotificationCenter defaultCenter] postNotificationName:kSFAuthenticationManagerFinishedNotification
-                                                                object:nil
-                                                              userInfo:nil];
-        } else {
+    if (info.authType != SFOAuthTypeRefresh) {
+        dispatch_async(dispatch_get_main_queue(), ^{
             [[NSNotificationCenter defaultCenter] postNotificationName:kSFNotificationUserDidLogIn
                                                                 object:nil
                                                               userInfo:nil];
-        }
-   });
+        });
+    }
 }
 
 - (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didFailWithError:(NSError *)error authInfo:(SFOAuthInfo *)info {
@@ -131,7 +125,7 @@ static NSString * const kSFAuthenticationManagerFinishedNotification = @"kSFAuth
     [self finishForUnsupportedFlow:@"User Agent" coordinator:coordinator];
 }
 
-- (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didBeginAuthenticationWithSafariViewController:(SFSafariViewController *)svc {
+- (void)oauthCoordinator:(SFOAuthCoordinator *)coordinator didBeginAuthenticationWithSession:(SFAuthenticationSession *)session {
     // Shouldn't happen (refreshSessionWithCompletion:error: is guarded by the presence of a refresh token), but....
     [self finishForUnsupportedFlow:@"Web Server" coordinator:coordinator];
 }

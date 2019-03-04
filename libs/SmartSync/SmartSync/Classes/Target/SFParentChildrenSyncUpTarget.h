@@ -29,7 +29,7 @@
 #import "SFAdvancedSyncUpTarget.h"
 
 NS_ASSUME_NONNULL_BEGIN
-
+NS_SWIFT_NAME(ParentChildrenSyncUpTarget)
 @interface SFParentChildrenSyncUpTarget : SFSyncUpTarget <SFAdvancedSyncUpTarget>
 
 /** Factory methods
@@ -42,7 +42,7 @@ NS_ASSUME_NONNULL_BEGIN
                     childrenUpdateFieldlist:(NSArray<NSString *> *)childrenUpdateFieldlist
                            relationshipType:(SFParentChildrenRelationshipType)relationshipType;
 
-+ (instancetype)newFromDict:(NSDictionary *)dict;
++ (instancetype)newFromDict:(nullable NSDictionary *)dict;
 
 @end
 

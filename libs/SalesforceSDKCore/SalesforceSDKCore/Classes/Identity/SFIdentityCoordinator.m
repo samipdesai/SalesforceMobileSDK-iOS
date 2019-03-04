@@ -22,12 +22,12 @@
  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import <SalesforceSDKCommon/SFJsonUtils.h>
 #import "SFIdentityCoordinator.h"
 #import "SFIdentityCoordinator+Internal.h"
 #import "SFOAuthCredentials.h"
 #import "SFOAuthSessionRefresher.h"
 #import "SFIdentityData.h"
-#import "SFJsonUtils.h"
 #import "SFUserAccountManager.h"
 #import "SFNetwork.h"
 
@@ -38,8 +38,8 @@ NSString * const     kSFIdentityErrorDomain                  = @"com.salesforce.
 
 // Private constants
 
-static NSString * const kHttpHeaderAuthorization             = @"Authorization";
-static NSString * const kHttpAuthHeaderFormatString          = @"Bearer %@";
+NSString * const kHttpHeaderAuthorization             = @"Authorization";
+NSString * const kHttpAuthHeaderFormatString          = @"Bearer %@";
 
 static NSString * const kSFIdentityError                      = @"error";
 static NSString * const kSFIdentityErrorDescription           = @"error_description";
@@ -136,7 +136,7 @@ static NSString * const kSFIdentityDataPropertyKey            = @"com.salesforce
     [request setHTTPShouldHandleCookies:NO];
     [SFSDKCoreLogger d:[self class] format:@"SFIdentityCoordinator:Starting identity request at %@", self.credentials.identityUrl.absoluteString];
     __weak __typeof(self) weakSelf = self;
-    SFNetwork *network = [[SFNetwork alloc] init];
+    SFNetwork *network = [[SFNetwork alloc] initWithEphemeralSession];
     self.session = network.activeSession;
     [network sendRequest:request dataResponseBlock:^(NSData *data, NSURLResponse *response, NSError *error) {
         __strong typeof(weakSelf) strongSelf = weakSelf;

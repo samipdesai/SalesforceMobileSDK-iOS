@@ -27,6 +27,10 @@
  */
 
 #import "SFMultipleSmartStoresTest.h"
+@interface SFOAuthCredentials ()
+@property (nonatomic, readwrite, nullable) NSURL *identityUrl;
+
+@end
 @interface SFMultipleSmartStoresTests()
 
 @property (nonatomic, strong) SFUserAccount *smartStoreUser;
@@ -40,7 +44,7 @@
 - (void) setUp
 {
     [super setUp];
-    [SFSDKSmartStoreLogger setLogLevel:DDLogLevelDebug];
+    [SFSDKSmartStoreLogger setLogLevel:SFLogLevelDebug];
     _smartStoreUser = [super setUpSmartStoreUser];
     [self setupGlobalStores];
     [self setupUserStores];
@@ -101,6 +105,7 @@
     NSString *orgId = [NSString stringWithFormat:@"org_%u", userIdentifier];
     user.credentials.identityUrl = [NSURL URLWithString:[NSString stringWithFormat:@"https://login.salesforce.com/id/%@/%@", orgId, userId]];
     NSError *error = nil;
+    [user transitionToLoginState:SFUserAccountLoginStateLoggedIn];
     [[SFUserAccountManager sharedInstance] saveAccountForUser:user error:&error];
      XCTAssertNil(error);
     [SFUserAccountManager sharedInstance].currentUser = user;

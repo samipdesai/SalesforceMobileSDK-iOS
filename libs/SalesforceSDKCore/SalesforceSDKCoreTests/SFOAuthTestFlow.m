@@ -23,14 +23,11 @@
  */
 
 #import "SFOAuthTestFlow.h"
-#import "SFOAuthOrgAuthConfiguration.h"
 #import "SFOAuthInfo.h"
 
 @interface SFOAuthTestFlow ()
 
 @property (nonatomic, weak) SFOAuthCoordinator *coordinator;
-@property (nonatomic, strong) SFOAuthOrgAuthConfiguration *retrieveOrgConf;
-@property (nonatomic, strong) NSError *retrieveOrgConfError;
 
 @end
 
@@ -48,11 +45,6 @@
         self.refreshTokenFlowIsSuccessful = YES;
     }
     return self;
-}
-
-- (void)setRetrieveOrgAuthConfigurationData:(SFOAuthOrgAuthConfiguration *)config error:(NSError *)error {
-    self.retrieveOrgConf = config;
-    self.retrieveOrgConfError = error;
 }
 
 #pragma mark - Private methods
@@ -105,7 +97,7 @@
 #pragma mark - SFOAuthCoordinatorFlow
 
 - (void)beginUserAgentFlow {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
     self.beginUserAgentFlowCalled = YES;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.timeBeforeUserAgentCompletion * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (self.userAgentFlowIsSuccessful) {
@@ -117,7 +109,7 @@
 }
 
 - (void)beginTokenEndpointFlow:(SFOAuthTokenEndpointFlow)flowType {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
     self.beginTokenEndpointFlowCalled = YES;
     self.tokenEndpointFlowType = flowType;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.timeBeforeRefreshTokenCompletion * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -130,24 +122,17 @@
 }
 
 - (void)beginJwtTokenExchangeFlow {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
     self.beginJwtTokenExchangeFlowCalled = YES;
 }
 
 - (void)beginNativeBrowserFlow {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
     self.beginNativeBrowserFlowCalled = YES;
 }
 
-- (void)retrieveOrgAuthConfiguration:(void (^)(SFOAuthOrgAuthConfiguration *orgAuthConfig, NSError *error))retrievedAuthConfigBlock {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
-    if (retrievedAuthConfigBlock) {
-        retrievedAuthConfigBlock(self.retrieveOrgConf, self.retrieveOrgConfError);
-    }
-}
-
 - (void)handleTokenEndpointResponse:(NSMutableData *) data{
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
     self.handleTokenEndpointResponseCalled = YES;
 }
 

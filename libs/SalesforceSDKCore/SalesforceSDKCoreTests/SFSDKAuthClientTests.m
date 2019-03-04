@@ -32,6 +32,11 @@
 #import "SFSDKAuthPreferences.h"
 #import "SalesforceSDKCore.h"
 #import "SFOAuthCoordinator+Internal.h"
+#import "SFSDKOAuthClientCache.h"
+#import "SFUserAccountManager+Internal.h"
+#import "SFUserAccount+Internal.h"
+#import "SFOAuthCredentials+Internal.h"
+
 @class SFSDKTestOAuthClient;
 
 @interface SFSDKTestOAuthClient : SFSDKOAuthClient
@@ -118,7 +123,7 @@
 
 - (void)revokeRefreshToken:(SFOAuthCredentials *)credentials
 {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
 }
 
 @end
@@ -149,6 +154,8 @@
 - (void)tearDown {
     // Put teardown code here. This method is called after the invocation of each test method in the class.
     [SFSDKOAuthClient setClientProvider:_originalProvider];
+    [SFUserAccountManager sharedInstance].idpAppURIScheme = nil;
+    [SFUserAccountManager sharedInstance].isIdentityProvider = NO;
     [super tearDown];
 }
 
@@ -160,7 +167,7 @@
 
     
    SFSDKOAuthClient *client = [SFSDKOAuthClient clientWithCredentials:credentials  configBlock:^(SFSDKOAuthClientConfig * config) {
-       config.idpEnabled = YES;
+       config.idpAppURIScheme = @"idpApp";
    }];
     
    XCTAssertNotNil(client);
@@ -180,7 +187,7 @@
 
     
     SFSDKOAuthClient *client = [SFSDKOAuthClient clientWithCredentials:credentials  configBlock:^(SFSDKOAuthClientConfig *config) {
-        config.advancedAuthConfiguration = SFOAuthAdvancedAuthConfigurationRequire;
+        config.useBrowserAuth = YES;
     }];
     
     XCTAssertNotNil(client);
@@ -238,20 +245,16 @@
     credentials.refreshToken = nil;
 
     SFSDKAuthPreferences *prefs = [[SFSDKAuthPreferences alloc] init];
-    [SalesforceSDKManager sharedManager].idpEnabled = YES;
+    [SalesforceSDKManager sharedManager].idpAppURIScheme = @"idpApp";
     [SalesforceSDKManager sharedManager].isIdentityProvider = NO;
     SFSDKOAuthClient *client = [SFSDKOAuthClient clientWithCredentials:credentials  configBlock:^(SFSDKOAuthClientConfig * config) {
-        config.idpEnabled = prefs.idpEnabled;
+         config.idpAppURIScheme = prefs.idpAppURIScheme;
     }];
-    
     XCTAssertNotNil(client);
     XCTAssertTrue([client isKindOfClass:[SFSDKTestOAuthClient class]]);
     XCTAssertTrue([client isKindOfClass:[SFSDKTestOAuthClient class]]);
     SFSDKTestOAuthClient *testClient = (SFSDKTestOAuthClient *)client;
     XCTAssertTrue(testClient.isIDPClient,@"Client should be a an IDP client when enabled through SDKManager");
-    prefs.idpEnabled = NO;
-    XCTAssertFalse(prefs.idpEnabled,@"Preferences for idpEnabled should be set to false");
-    
 }
 
 - (void)testPreferencesProvider {
@@ -261,7 +264,7 @@
     credentials.refreshToken = nil;
 
     [SalesforceSDKManager sharedManager].isIdentityProvider = YES;
-    [SalesforceSDKManager sharedManager].idpEnabled = NO;
+    [SalesforceSDKManager sharedManager].idpAppURIScheme = @"idpApp";
     SFSDKOAuthClient *client = [SFSDKOAuthClient clientWithCredentials:credentials  configBlock:^(SFSDKOAuthClientConfig * config) {
         config.isIdentityProvider = prefs.isIdentityProvider;
     }];
@@ -283,7 +286,7 @@
     credentials.refreshToken = nil;
 
     [SalesforceSDKManager sharedManager].isIdentityProvider = YES;
-    [SalesforceSDKManager sharedManager].idpEnabled = NO;
+    [SalesforceSDKManager sharedManager].idpAppURIScheme = @"idpApp";
     
     [SalesforceSDKManager sharedManager].idpUserSelectionBlock = ^UIViewController<SFSDKUserSelectionView> * {
          TestUserSelectionNavViewController *userSelectionNavViewController = [[TestUserSelectionNavViewController alloc] init];
@@ -319,7 +322,7 @@
     credentials.refreshToken = nil;
 
     [SalesforceSDKManager sharedManager].isIdentityProvider = YES;
-    [SalesforceSDKManager sharedManager].idpEnabled = NO;
+    [SalesforceSDKManager sharedManager].idpAppURIScheme = @"idpApp";
 
     [SalesforceSDKManager sharedManager].idpLoginFlowSelectionBlock = ^UIViewController<SFSDKLoginFlowSelectionView> * {
         TestIDPLoginNavViewController *idpLoginViewController = [[TestIDPLoginNavViewController alloc] init];
@@ -453,15 +456,11 @@
     SFOAuthCredentials *credentials = [[SFOAuthCredentials alloc] initWithIdentifier:@"testId" clientId:@"testId" encrypted:NO];
     credentials.accessToken = nil;
     credentials.refreshToken = nil;
-
-    
-    [SFUserAccountManager sharedInstance].advancedAuthConfiguration = SFOAuthAdvancedAuthConfigurationRequire;
-    
-    
+    [SFUserAccountManager sharedInstance].useBrowserAuth = YES;
     SFSDKOAuthClient *client = [SFSDKOAuthClient clientWithCredentials:credentials  configBlock:^(SFSDKOAuthClientConfig * config) {
         config.delegate = self;
         config.safariViewDelegate = self;
-        config.advancedAuthConfiguration = [SFUserAccountManager sharedInstance].advancedAuthConfiguration;
+        config.useBrowserAuth = [SFUserAccountManager sharedInstance].useBrowserAuth;
     }];
    
     XCTAssertNotNil(client);
@@ -511,31 +510,12 @@
 
 }
 
-#pragma mark - SFSDKOAuthClientSafariViewDelegate
-
-- (void)authClientDidProceedWithBrowserFlow:(SFSDKOAuthClient *)client {
- [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
-}
-
-- (void)authClientDidCancelBrowserFlow:(SFSDKOAuthClient *)client {
- [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
-}
-
-- (void)authClient:(SFSDKOAuthClient *)client willDisplayAuthSafariViewController:(SFSafariViewController *_Nonnull)svc {
- [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
-}
-
-- (void)authClientDidCancelGenericFlow:(SFSDKOAuthClient *)client {
- [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
-}
-
-- (void)authClient:(SFSDKOAuthClient * _Nonnull)client displayMessage:(nonnull SFSDKAlertMessage *)message { 
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+- (void)authClient:(SFSDKOAuthClient * _Nonnull)client displayMessage:(nonnull SFSDKAlertMessage *)message {
 }
 
 #pragma mark SFOAuthCoordinatorFlow
 - (void)beginUserAgentFlow {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
     if (!self->_currentClient.isTestingForErrorCallback) {
         [_currentClient.coordinator handleUserAgentResponse:[self userAgentSuccessUrl]];
     }else {
@@ -545,7 +525,7 @@
 }
 
 - (void)beginTokenEndpointFlow:(SFOAuthTokenEndpointFlow)flowType {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (!self->_currentClient.isTestingForErrorCallback) {
@@ -557,11 +537,11 @@
 }
 
 - (void)beginJwtTokenExchangeFlow {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
 }
 
 - (void)beginNativeBrowserFlow {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!self->_currentClient.isTestingForErrorCallback) {
             [self->_currentClient.coordinator handleTokenEndpointResponse:[self refreshTokenSuccessData]];
@@ -571,12 +551,8 @@
     });
 }
 
-- (void)retrieveOrgAuthConfiguration:(void (^)(SFOAuthOrgAuthConfiguration *orgAuthConfig, NSError *error))retrievedAuthConfigBlock {
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
-}
-
 - (void)handleTokenEndpointResponse:(NSMutableData *) data{
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
+    [SFLogger log:[self class] level:SFLogLevelDebug format:@"%@ called.", NSStringFromSelector(_cmd)];
   
 }
 

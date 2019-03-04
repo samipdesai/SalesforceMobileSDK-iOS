@@ -22,6 +22,8 @@
  WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import <Foundation/Foundation.h>
+
 NS_ASSUME_NONNULL_BEGIN
 
 @class FMDatabaseQueue;
@@ -38,7 +40,7 @@ typedef NS_ENUM(NSUInteger, SFAlterSoupStep) {
     SFAlterSoupStepReIndexSoup,
     SFAlterSoupStepDropOldTable,
     SFAlterSoupStepCleanup
-};
+} NS_SWIFT_NAME(AlterSoupLongOperation.Step);
 
 
 // Fields of details for alter soup long operation row in long_operations_status table
@@ -54,7 +56,7 @@ static NSInteger  const kLastStep = SFAlterSoupStepCleanup;
 /**
  Use this class to configure and run alter soup "long" operations. Note that these operations can take a long time to complete.
  */
-
+NS_SWIFT_NAME(AlterSoupLongOperation)
 @interface SFAlterSoupLongOperation : NSObject {
 
 }

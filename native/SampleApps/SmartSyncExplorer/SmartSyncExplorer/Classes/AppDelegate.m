@@ -26,16 +26,18 @@
 #import "InitialViewController.h"
 #import "ContactListViewController.h"
 #import <SalesforceSDKCore/SFPushNotificationManager.h>
-#import <SalesforceSDKCore/SFDefaultUserManagementViewController.h>
 #import <SalesforceSDKCore/SalesforceSDKManager.h>
-#import <SalesforceSDKCore/SFUserAccountManager.h>
 #import <SalesforceSDKCore/SFSDKAppConfig.h>
-#import <SmartStore/SalesforceSDKManagerWithSmartStore.h>
-#import <SalesforceAnalytics/SFSDKDatasharingHelper.h>
-#import <SalesforceAnalytics/NSUserDefaults+SFAdditions.h>
+#import <SalesforceSDKcore/SFSDKWindowManager.h>
+#import <SalesforceSDKCore/SFSDKAuthHelper.h>
+#import <SmartSync/SmartSyncSDKManager.h>
+#import <SalesforceSDKCommon/SFSDKDatasharingHelper.h>
+#import <SalesforceSDKCommon/NSUserDefaults+SFAdditions.h>
 #import <SmartSyncExplorerCommon/SmartSyncExplorerConfig.h>
+#import <SalesforceSDKcore/SFSDKNavigationController.h>
 #import "IDPLoginNavViewController.h"
-@interface AppDelegate ()
+
+@interface AppDelegate () <SalesforceSDKManagerDelegate>
 
 /**
  * Convenience method for setting up the main UIViewController and setting self.window's rootViewController
@@ -62,75 +64,50 @@
         SmartSyncExplorerConfig *config = [SmartSyncExplorerConfig sharedInstance];
         [SFSDKDatasharingHelper sharedInstance].appGroupName = config.appGroupName;
         [SFSDKDatasharingHelper sharedInstance].appGroupEnabled = config.appGroupsEnabled;
-        [SalesforceSDKManager setInstanceClass:[SalesforceSDKManagerWithSmartStore class]];
+
+        [SmartSyncSDKManager initializeSDK];
         
-        // Need to use SalesforceSDKManagerWithSmartStore when using smartstore
-        [SalesforceSDKManager setInstanceClass:[SalesforceSDKManagerWithSmartStore class]];
-        [SalesforceSDKManager sharedManager].appConfig.remoteAccessConsumerKey = config.remoteAccessConsumerKey;
-        [SalesforceSDKManager sharedManager].appConfig.oauthRedirectURI = config.oauthRedirectURI;
-        [SalesforceSDKManager sharedManager].appConfig.oauthScopes = [NSSet setWithArray:config.oauthScopes];
-        __weak typeof(self) weakSelf = self;
+        //App Setup for any changes to the current authenticated user
+        __weak typeof (self) weakSelf = self;
+        [SFSDKAuthHelper registerBlockForCurrentUserChangeNotifications:^{
+            __strong typeof (weakSelf) strongSelf = weakSelf;
+            [strongSelf setUserLoginStatus:YES];
+            [strongSelf resetViewState:^{
+                [strongSelf setupRootViewController];
+            }];
+        }];
         
         //Uncomment following block to enable IDP Login flow.
         /*
-        [SalesforceSDKManager sharedManager].idpEnabled = YES;
-         //scheme of idpAppp
-        [SalesforceSDKManager sharedManager].idpAppScheme = @"sampleidpapp";
+        //scheme of idpAppp
+        [SmartSyncSDKManager sharedManager].idpAppURIScheme = @"sampleidpapp";
          //user friendly display name
-        [SalesforceSDKManager sharedManager].appDisplayName = @"SampleAppOne";
+        [SmartSyncSDKManager sharedManager].appDisplayName = @"SampleAppOne";
          
         //Use the following code block to replace the login flow selection dialog
-        [SalesforceSDKManager sharedManager].idpLoginFlowSelectionBlock = ^UIViewController<SFSDKLoginFlowSelectionView> * _Nonnull{
+        [SmartSyncSDKManager sharedManager].idpLoginFlowSelectionBlock = ^UIViewController<SFSDKLoginFlowSelectionView> * _Nonnull{
             IDPLoginNavViewController *controller = [[IDPLoginNavViewController alloc] init];
             return controller;
         };
         */
-        
-        [SalesforceSDKManager sharedManager].postLaunchAction = ^(SFSDKLaunchAction launchActionList) {
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            //
-            // If you wish to register for push notifications, uncomment the line below.  Note that,
-            // if you want to receive push notifications from Salesforce, you will also need to
-            // implement the application:didRegisterForRemoteNotificationsWithDeviceToken: method (below).
-            //
-            //[[SFPushNotificationManager sharedInstance] registerForRemoteNotifications];
-            //
-            [strongSelf setUserLoginStatus:YES];
-            [SFSDKLogger log:[strongSelf class] level:DDLogLevelInfo format:@"Post-launch: launch actions taken: %@", [SalesforceSDKManager launchActionsStringRepresentation:launchActionList]];
-            [strongSelf setupRootViewController];
-
-        };
-        [SalesforceSDKManager sharedManager].launchErrorAction = ^(NSError *error, SFSDKLaunchAction launchActionList) {
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            [SFSDKLogger log:[strongSelf class] level:DDLogLevelError format:@"Error during SDK launch: %@", [error localizedDescription]];
-            [strongSelf initializeAppViewState];
-            [[SalesforceSDKManager sharedManager] launch];
-        };
-        [SalesforceSDKManager sharedManager].postLogoutAction = ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            [strongSelf setUserLoginStatus:NO];
-            [strongSelf handleSdkManagerLogout];
-        };
-        [SalesforceSDKManager sharedManager].switchUserAction = ^(SFUserAccount *fromUser, SFUserAccount *toUser) {
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            [strongSelf setUserLoginStatus:NO];
-            [strongSelf handleUserSwitch:fromUser toUser:toUser];
-        };
     }
     return self;
 }
 
-- (void)setUserLoginStatus :(BOOL) loggedIn {
-    [[NSUserDefaults msdkUserDefaults] setBool:loggedIn forKey:@"userLoggedIn"];
-    [[NSUserDefaults msdkUserDefaults] synchronize];
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"%d userLoggedIn", [[NSUserDefaults msdkUserDefaults] boolForKey:@"userLoggedIn"] ];
-}
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
-    self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+    // The Mobile SDK uses multiple UIWindow's inorder to present views. Having
+    // Multiple windows with different controllers varying rotational behaviors
+    // lead to weird UIWindow behaviors. To avoid such rotation and other issues
+    // between visible and hidden windows use the SFSDKUIWindow instead of  
+    // UIWindow.
+    self.window = [[SFSDKUIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     [self initializeAppViewState];
-    [[SalesforceSDKManager sharedManager] launch];
+    __weak typeof (self) weakSelf = self;
+    [SFSDKAuthHelper loginIfRequired:^{
+        [weakSelf setupRootViewController];
+    }];
     return YES;
 }
 
@@ -139,10 +116,10 @@
     //
     // Uncomment the code below to register your device token with the push notification manager
     //
-    //[[SFPushNotificationManager sharedInstance] didRegisterForRemoteNotificationsWithDeviceToken:deviceToken];
-    //if ([SFUserAccountManager sharedInstance].currentUser.credentials.accessToken != nil) {
-    //    [[SFPushNotificationManager sharedInstance] registerForSalesforceNotifications];
-    //}
+    // [[SFPushNotificationManager sharedInstance] didRegisterForRemoteNotificationsWithDeviceToken:deviceToken];
+    // if ([SFUserAccountManager sharedInstance].currentUser.credentials.accessToken != nil) {
+    //     [[SFPushNotificationManager sharedInstance] registerSalesforceNotificationsWithCompletionBlock:nil failBlock:nil];
+    // }
     //
 }
 
@@ -154,14 +131,18 @@
 - (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options
 {
     
-    //Uncomment following block to enable IDP Login flow
-    /*
-    return [[SFUserAccountManager sharedInstance] handleAdvancedAuthenticationResponse:url options:options];
-    */
-   return NO;
+    // Uncomment following block to enable IDP Login flow
+    // return [[SFUserAccountManager sharedInstance] handleIDPAuthenticationResponse:url options:options];
+    return NO;
+
 }
 
 #pragma mark - Private methods
+- (void)setUserLoginStatus:(BOOL) loggedIn {
+    [[NSUserDefaults msdkUserDefaults] setBool:loggedIn forKey:@"userLoggedIn"];
+    [[NSUserDefaults msdkUserDefaults] synchronize];
+    [SFSDKSmartSyncLogger log:[self class] level:SFLogLevelDebug format:@"%d userLoggedIn", [[NSUserDefaults msdkUserDefaults] boolForKey:@"userLoggedIn"] ];
+}
 
 - (void)initializeAppViewState
 {
@@ -172,8 +153,9 @@
 - (void)setupRootViewController
 {
     ContactListViewController *rootVC = [[ContactListViewController alloc] initWithStyle:UITableViewStylePlain];
-    UINavigationController *navVC = [[UINavigationController alloc] initWithRootViewController:rootVC];
+    SFSDKNavigationController *navVC = [[SFSDKNavigationController alloc] initWithRootViewController:rootVC];
     self.window.rootViewController = navVC;
+    [self.window makeKeyAndVisible];
 }
 
 - (void)resetViewState:(void (^)(void))postResetBlock
@@ -187,45 +169,10 @@
     }
 }
 
-- (void)handleSdkManagerLogout
-{
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"SFUserAccountManager logged out. Resetting app."];
-    [self resetViewState:^{
-        [self initializeAppViewState];
-        
-        // Multi-user pattern:
-        // - If there are two or more existing accounts after logout, let the user choose the account
-        //   to switch to.
-        // - If there is one existing account, automatically switch to that account.
-        // - If there are no further authenticated accounts, present the login screen.
-        //
-        // Alternatively, you could just go straight to re-initializing your app state, if you know
-        // your app does not support multiple accounts.  The logic below will work either way.
-        NSArray *allAccounts = [SFUserAccountManager sharedInstance].allUserAccounts;
-        if ([allAccounts count] > 1) {
-            SFDefaultUserManagementViewController *userSwitchVc = [[SFDefaultUserManagementViewController alloc] initWithCompletionBlock:^(SFUserManagementAction action) {
-                [self.window.rootViewController dismissViewControllerAnimated:YES completion:NULL];
-            }];
-            [self.window.rootViewController presentViewController:userSwitchVc animated:YES completion:NULL];
-        } else {
-            if ([allAccounts count] == 1) {
-                [SFUserAccountManager sharedInstance].currentUser = ([SFUserAccountManager sharedInstance].allUserAccounts)[0];
-            }
-            
-            [[SalesforceSDKManager sharedManager] launch];
-        }
-    }];
+- (void)sdkManagerWillResignActive {
+    if ([SmartSyncSDKManager sharedManager].useSnapshotView) {
+        // Remove the keyboard if it is showing..
+        [[SFSDKWindowManager sharedManager].activeWindow.window endEditing:YES];
+    }
 }
-
-- (void)handleUserSwitch:(SFUserAccount *)fromUser
-                  toUser:(SFUserAccount *)toUser
-{
-    [SFSDKLogger log:[self class] level:DDLogLevelDebug format:@"SFUserAccountManager changed from user %@ to %@.  Resetting app.",
-     fromUser.userName, toUser.userName];
-    [self resetViewState:^{
-        [self initializeAppViewState];
-        [[SalesforceSDKManager sharedManager] launch];
-    }];
-}
-
 @end

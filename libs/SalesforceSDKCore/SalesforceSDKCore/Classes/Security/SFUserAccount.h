@@ -25,12 +25,13 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import "SFUserAccountConstants.h"
+#import "SFIdentityData.h"
+#import "SalesforceSDKConstants.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 @class SFCommunityData;
 @class SFUserAccountIdentity;
-@class SFIdentityData;
 @class SFOAuthCredentials;
 
 /**
@@ -51,11 +52,12 @@ typedef NS_ENUM(NSUInteger, SFUserAccountLoginState) {
      User account is in the process of logging out.
      */
     SFUserAccountLoginStateLoggingOut,
-};
+} NS_SWIFT_NAME(UserAccount.LoginState);
 
 /** Class that represents an `account`. An `account` represents
  a user together with the current community it is logged in.
  */
+NS_SWIFT_NAME(UserAccount)
 @interface SFUserAccount : NSObject <NSSecureCoding>
 
 /** The access scopes for this user
@@ -79,23 +81,23 @@ typedef NS_ENUM(NSUInteger, SFUserAccountLoginState) {
  on the server-side. This URL takes into account the
  current community if available (see `communityId`).
  */
-@property (nonatomic, copy, readonly) NSURL *apiUrl;
+@property (nonatomic, copy, readonly, nullable) NSURL *apiUrl;
 
 /** The user's email
  */
-@property (nonatomic, copy, nullable) NSString *email;
+@property (nonatomic, copy, nullable) NSString *email SFSDK_DEPRECATED(7.1, 8.0, "Use SFUserAccount.idData properties instead");
 
 /** The user's organization name
  */
-@property (nonatomic, copy) NSString *organizationName;
+@property (nonatomic, copy) NSString *organizationName SFSDK_DEPRECATED(7.1, 8.0, "Will be removed");
 
 /** The user's full name
  */
-@property (nonatomic, copy) NSString *fullName;
+@property (nonatomic, copy) NSString *fullName SFSDK_DEPRECATED(7.1, 8.0, "Use SFUserAccount.idData properties instead");
 
 /** The user's name
  */
-@property (nonatomic, copy) NSString *userName;
+@property (nonatomic, copy) NSString *userName SFSDK_DEPRECATED(7.1, 8.0, "Use SFUserAccount.idData properties instead");
 
 /** The user's photo. Usually store a thumbnail of the user.
  Note: the consumer of this class must set the photo at least once,
@@ -114,7 +116,7 @@ typedef NS_ENUM(NSUInteger, SFUserAccountLoginState) {
 
 /** The list of communities (as SFCommunityData item)
  */
-@property (nonatomic, copy, nullable) NSArray<SFCommunityData *> *communities;
+@property (nonatomic, copy, nullable) NSArray<SFCommunityData *> *communities SFSDK_DEPRECATED(7.1, 8.0, "Save these types of properties in your app.");
 
 /** Returns YES if the user has an access token and, presumably,
  a valid session.
@@ -148,7 +150,7 @@ typedef NS_ENUM(NSUInteger, SFUserAccountLoginState) {
  @param communityId The ID of the community
  @return The dictionary for the given community
  */
-- (nullable SFCommunityData*)communityWithId:(NSString*)communityId;
+- (nullable SFCommunityData*)communityWithId:(NSString*)communityId SFSDK_DEPRECATED(7.1, 8.0, "Store SFCommunityData in your app.");
 
 /** Set object in customData dictionary
  
@@ -178,6 +180,23 @@ typedef NS_ENUM(NSUInteger, SFUserAccountLoginState) {
  @return a key identifying this user account for the specified scope
  */
 NSString *_Nullable SFKeyForUserAndScope(SFUserAccount * _Nullable user, SFUserAccountScope scope);
+
+/** Function that returns a key that uniquely identifies this user,org & community for the
+ given scope. Note that if you use SFUserAccountScopeGlobal,
+ the same key will be returned regardless of the user account.
+ 
+ @param userId The user identifier
+ @param orgId The org identifier
+ @param communityId The community id identifier
+ @param scope The scope
+ @return a key identifying this user account for the specified scope
+ */
+NSString *_Nullable SFKeyForUserIdAndScope(NSString *_Nullable userId,NSString *_Nullable orgId, NSString *_Nullable communityId, SFUserAccountScope scope);
+
+/** Function that returns a key for scope SFUserAccountScopeGlobal,
+  @return a key identifying this scope for the specified scope
+ */
+NSString *SFKeyForGlobalScope(void);
 
 @end
 

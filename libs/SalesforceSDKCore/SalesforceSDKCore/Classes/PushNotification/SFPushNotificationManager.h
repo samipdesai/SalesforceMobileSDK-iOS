@@ -23,6 +23,7 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <SalesforceSDKCore/SalesforceSDKConstants.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -39,6 +40,10 @@ NS_ASSUME_NONNULL_BEGIN
 /** ID returned when registering for Salesforce push notifications.
  */
 @property (nonatomic, strong) NSString* deviceSalesforceId;
+
+/** Custom push notification for additional HTTP POST body.
+ */
+@property (nullable, nonatomic, strong) NSDictionary* customPushRegistrationBody;
 
 /** The share instance of this class.
  */
@@ -59,22 +64,19 @@ NS_ASSUME_NONNULL_BEGIN
 /**
  * Register for notifications with Salesforce.
  * Call this method after authenticating with Salesforce and registering with APNS.
- * @return YES for successful registration call made.
+ * @param completionBlock Completion block.
+ * @param failBlock fail block.
+ * @return YES for successful registration call being made.
  */
-- (BOOL)registerForSalesforceNotifications;
-
-/**
- * Unregister from notifications with Salesforce for all users. This method is called at logout.
- * @return YES for successful unregistration call being made.
- */
-- (BOOL)unregisterSalesforceNotifications;
+- (BOOL)registerSalesforceNotificationsWithCompletionBlock:(nullable void (^)(void))completionBlock failBlock:(nullable void (^)(void))failBlock;
 
 /**
  * Unregister from notifications with Salesforce for a specific user. This method is called at logout.
  * @param user User account.
+ * @param completionBlock Completion block.
  * @return YES for successful unregistration call being made.
  */
-- (BOOL)unregisterSalesforceNotifications:(SFUserAccount*)user;
+- (BOOL)unregisterSalesforceNotificationsWithCompletionBlock:(SFUserAccount*)user completionBlock:(nullable void (^)(void))completionBlock;
 
 @end
 

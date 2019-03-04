@@ -24,8 +24,7 @@
 
 #import "SFDefaultUserManagementViewController+Internal.h"
 #import "SFDefaultUserManagementListViewController.h"
-#import "SFAuthenticationManager.h"
-
+#import "SFUserAccountManager.h"
 @implementation SFDefaultUserManagementViewController
 
 - (id)initWithCompletionBlock:(SFUserManagementCompletionBlock)completionBlock
@@ -68,14 +67,7 @@
 
 - (void)actionLogout
 {
-    // If we got here, logging out the current user is implied.
-    if ([SFUserAccountManager sharedInstance].useLegacyAuthenticationManager) {
-        SFSDK_USE_DEPRECATED_BEGIN
-        [[SFAuthenticationManager sharedManager] logout];
-        SFSDK_USE_DEPRECATED_END
-    }else {
-         [[SFUserAccountManager sharedInstance] logout];
-    }
+    [[SFUserAccountManager sharedInstance] logout];
 }
 
 - (void)actionSwitchUser:(SFUserAccount *)user
@@ -85,7 +77,11 @@
 
 - (void)actionCreateNewUser
 {
-    [[SFUserAccountManager sharedInstance] switchToNewUser];
+    [[SFUserAccountManager sharedInstance] loginWithCompletion:^(SFOAuthInfo * authInfo, SFUserAccount * newUser) {
+        [[SFUserAccountManager sharedInstance] switchToUser:newUser];
+    } failure:^(SFOAuthInfo * authInfo, NSError * error) {
+        [SFSDKCoreLogger e:[self class] format:@"Attempt to add new user failed %@",[error localizedDescription]];
+    }];
 }
 
 - (void)execCompletionBlock:(SFUserManagementAction)action account:(SFUserAccount *)actionAccount

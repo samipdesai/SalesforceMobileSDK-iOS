@@ -29,9 +29,9 @@
 
 #import "SFSDKOAuthClientCache.h"
 #import "SFSDKOAuthClient.h"
-#import "SFSDKSafeMutableDictionary.h"
 #import "SFSDKOAuthClientConfig.h"
 #import "SFSDKAuthPreferences.h"
+#import <SalesforceSDKCommon/SFSDKSafeMutableDictionary.h>
 
 static NSString *const kSFBasicSuffix = @"BASIC";
 static NSString *const kSFIDPSuffix = @"IDP";
@@ -59,6 +59,10 @@ static NSString *const kSFAdvancedSuffix = @"ADVANCED";
     [self.oauthClientInstances setObject:client forKey:key];
 }
 
+- (void)addClient:(SFSDKOAuthClient *)client forKey:(NSString *)key {
+    [self.oauthClientInstances setObject:client forKey:key];
+}
+
 - (void)removeClient:(SFSDKOAuthClient *)client {
     NSString *key = [[self class] keyFromClient:client];
     [self.oauthClientInstances removeObject:key];
@@ -77,12 +81,13 @@ static NSString *const kSFAdvancedSuffix = @"ADVANCED";
     SFOAuthClientKeyType clientType =  SFOAuthClientKeyTypeBasic;
     if (preferences.isIdentityProvider || preferences.idpEnabled) {
         clientType = SFOAuthClientKeyTypeIDP;
-    }else if (preferences.advancedAuthConfiguration == SFOAuthAdvancedAuthConfigurationRequire) {
+    } else if (preferences.requireBrowserAuthentication) {
         clientType = SFOAuthClientKeyTypeAdvanced;
     }
     return [self keyFromCredentials:credentials type:clientType];
     
 }
+
 + (NSString *)keyFromCredentials:(SFOAuthCredentials *)credentials type:(SFOAuthClientKeyType)clientType {
     return [NSString stringWithFormat:@"%@-%lu", credentials.identifier,(unsigned long)clientType];
 }
@@ -91,16 +96,14 @@ static NSString *const kSFAdvancedSuffix = @"ADVANCED";
     return [NSString stringWithFormat:@"%@-%lu", prefix,(unsigned long)clientType];
 }
 
-
 + (NSString *)keyFromClient:(SFSDKOAuthClient *)client{
 
     SFOAuthClientKeyType clientType = SFOAuthClientKeyTypeBasic;
 
     if (client.config.idpEnabled)
         clientType = SFOAuthClientKeyTypeIDP;
-    else if (client.config.advancedAuthConfiguration == SFOAuthAdvancedAuthConfigurationRequire)
+    else if (client.config.useBrowserAuth)
         clientType = SFOAuthClientKeyTypeAdvanced;
-
     return [NSString stringWithFormat:@"%@-%lu", client.credentials.identifier, (unsigned long)clientType];
 }
 

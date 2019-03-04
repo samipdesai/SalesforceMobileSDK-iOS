@@ -72,7 +72,7 @@ NS_ASSUME_NONNULL_BEGIN
 /** Returns the preferences object for the given key.
  @param key The key of the requested object.
  */
-- (id)objectForKey:(NSString*)key;
+- (nullable id)objectForKey:(NSString*)key;
 
 /** Sets the preference object for the given attribute key. Logs an SFLogLevelError if the key is not found.
  @param object Object to be set.
@@ -85,6 +85,11 @@ NS_ASSUME_NONNULL_BEGIN
  @param key Key of object to be removed.
  */
 - (void)removeObjectForKey:(NSString*)key;
+
+/** Returns a YES if the key exits, otherwise NO.
+ @param key THe key to check the existance of. 
+ */
+- (BOOL)keyExists:(NSString*)key;
 
 /** Returns the Boolean preference value for the given key.
  @param key The key of the requested preference value.
